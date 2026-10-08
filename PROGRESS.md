@@ -1,25 +1,29 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: before Checkpoint 0.
+Updated: Checkpoint 0 complete.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 0 — not started.**
+**Checkpoint 1 — not started.**
 
 ## What's Done
 
-Nothing yet. PLAN.md and AGENTS.md are drafted. Waiting for "go."
+- ✅ Checkpoint 0: Project skeleton, venv, pinned dependencies, pip-audit clean, red-green TDD.
+  - Commit: `f186259`
+  - All 7 skeleton tests pass.
+  - pip-audit: **No known vulnerabilities found.**
 
 ## What's Next
 
-1. Create folder structure.
-2. Initialize `.venv` inside the project folder.
-3. Pin current versions in `requirements.txt`, install, run `pip-audit`.
-4. Write `.env.example` and `.gitignore`.
-5. Write `tests/test_skeleton.py` (failing first, then pass).
-6. Commit.
+1. Research Microsoft sign-in + directory audit log schemas.
+2. Write failing tests for synthetic data generator.
+3. Build `itdr_agent/data_generator.py` with Faker.
+4. Plant 5 MITRE ATT&CK attack patterns in synthetic data.
+5. Generate and commit fixture files to `data/fixtures/`.
+6. Make tests pass.
+7. Commit.
 
 ## Decisions Made
 
@@ -43,8 +47,7 @@ Nothing yet. PLAN.md and AGENTS.md are drafted. Waiting for "go."
 
 1. **Which free OpenRouter model?** Must verify existence and availability before Checkpoint 5. Candidates: `mistralai/mistral-7b-instruct:free`, `meta-llama/llama-3.1-8b-instruct:free`, `microsoft/phi-3-medium-128k-instruct:free`.
 2. **Framework choice for Investigator.** `smolagents` vs. lightweight custom ReAct loop. Decision deferred to Checkpoint 4 implementation.
-3. **pip-audit results unknown.** Will discover at Checkpoint 0.
 
 ## Commit History
 
-None yet.
+- `f186259` — checkpoint-0: skeleton, venv, pinned deps, pip-audit clean, red-green TDD
