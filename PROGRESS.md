@@ -27,6 +27,12 @@ Updated: Checkpoint 1 revised to review notes; Checkpoint 2 complete.
   - Fixtures committed: `users.jsonl` (25), `sign_ins.jsonl` (109), `directory_audits.jsonl` (52), `alerts.jsonl` (5).
   - Same seed ⇒ byte-identical files (verified by SHA-256 across two runs).
   - Every user/email uses `@contoso.com`; test rejects common leaked domains.
+- ✅ Checkpoint 1 fix (review feedback):
+  - **Red:** `86976df` — tests only; `pytest tests/test_data_generator.py` → **1 failed, 19 passed**.
+  - **Green:** `d5cdcec` — scenario-aware alert selection; **20 passed**, full suite **44 passed**.
+  - `ALERT_002` (MFA fatigue) now references an actual MFA-denied sign-in; `ALERT_005` (privilege escalation) references a risky session and is `atRisk`, instead of pointing at benign baseline sign-ins.
+  - Review items 1–5 (openai 3.26.1, timeout `monkeypatch.delenv`, `riskEventTypes_v2`, corrected MITRE IDs, `@contoso.com` test) were already landed in `19ec859`, `9f2d832`, and `188a293`; this fix closes the remaining alert-matching gap.
+- ✅ Governance: added AGENTS.md rule 9 — after each checkpoint, stop, show evidence, and wait for Joe's go before starting the next.
 
 ## Microsoft Graph Schema Sources
 
@@ -64,6 +70,8 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
+**Waiting for Joe's go** before starting Checkpoint 3 (per AGENTS.md rule 9).
+
 Checkpoint 3 — MS Graph simulation layer:
 1. Write failing `tests/test_sim_api.py` (red commit first).
 2. Build `itdr_agent/fixture_store.py` to load/query committed JSONL fixtures.
@@ -99,6 +107,7 @@ Checkpoint 3 — MS Graph simulation layer:
 | Confidence guardrail as a plain function | Pydantic validators run on construction and would block honest low-confidence reports. The orchestrator applies policy explicitly. |
 | `Verdict` as `str, Enum` | Serializes cleanly to JSON and compares naturally with plain strings in tests. |
 | Red-green commits from Checkpoint 1 onward | Review requirement: failing tests are committed first (`checkpoint-1: red`), then the code (`checkpoint-1: green`). |
+| Scenario-aware alert selection | Each alert's `riskEventTypes_v2`/`status` must point at the sign-in that demonstrates its pattern, or the downstream Investigator gets a meaningless trigger. |
 
 ## Open Problems
 
@@ -116,3 +125,6 @@ Checkpoint 3 — MS Graph simulation layer:
 - `19ec859` — checkpoint-0-fix: bump openai to 3.26.1, harden timeout test against real .env
 - `9f2d832` — checkpoint-1: red — real Graph field names, corrected MITRE IDs, byte-stable and synthetic-domain tests
 - `188a293` — checkpoint-1: green — Graph-accurate fields, corrected MITRE IDs, byte-identical fixtures
+- `9d2a539` — checkpoint-1: update PROGRESS.md with Graph sources, MITRE checklist, red/green commits
+- `86976df` — checkpoint-1-fix: red — alerts must reference their planted pattern evidence
+- `d5cdcec` — checkpoint-1-fix: green — scenario-aware alert selection points at real pattern evidence

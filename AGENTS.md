@@ -14,6 +14,7 @@ These rules stand for the life of the project. Read this and PROGRESS.md at the 
 6. **Ask before running any command outside the project folder.**
 7. **Ask me only about scope, design, or missing facts.** Decide implementation details yourself.
 8. **At the end of every task, update PROGRESS.md** (done, next, decisions, problems, commit hash) and commit it.
+9. **After each checkpoint, stop, show the evidence, and wait for Joe's go before starting the next one.**
 
 ## Session Start Ritual
 
