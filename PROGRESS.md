@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 1 complete.
+Updated: Checkpoint 2 complete.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 2 — not started.**
+**Checkpoint 3 — not started.**
 
 ## What's Done
 
@@ -21,15 +21,22 @@ Updated: Checkpoint 1 complete.
     `directory_audits.jsonl` (52), `alerts.jsonl` (5).
   - Generation is deterministic given a seed (`generate_dataset(seed=1337)`).
   - pip-audit: **No known vulnerabilities found.**
+- ✅ Checkpoint 2: Pydantic schemas + structured I/O contracts.
+  - Commit: `d445d00`
+  - 17 new tests in `tests/test_schemas.py`; full suite 39 passed.
+  - `InvestigatorOutput` enforces `is_critical_gap` from data (profile missing OR empty sign-in history), never from the caller.
+  - `AdjudicatorOutput` validates `Verdict` enum, confidence 0–1, and rollback on every containment step.
+  - `apply_confidence_guardrail` is a plain function (not a validator): <0.70 and verdict != INSUFFICIENT_DATA → coerced verdict + audit note, confidence left honest.
 
 ## What's Next
 
-Checkpoint 2 — Pydantic schemas + structured I/O contracts:
-1. Write failing `tests/test_schemas.py`.
-2. Define `InvestigatorOutput` (evidence dossier) with `is_critical_gap` rule.
-3. Define `AdjudicatorOutput` (incident report) with `verdict` enum and containment/rollback.
-4. Implement confidence coercion in code (<0.7 and verdict != INSUFFICIENT_DATA → INSUFFICIENT_DATA + audit note).
-5. Make tests pass and commit.
+Checkpoint 3 — MS Graph simulation layer:
+1. Write failing `tests/test_sim_api.py`.
+2. Build `itdr_agent/fixture_store.py` to load/query committed JSONL fixtures.
+3. Build `itdr_agent/sim_api.py` exposing the five Graph-shaped endpoints.
+4. Support deterministic error injection (`injected_error` param) for 429/500.
+5. Unknown IDs return `None`/empty lists, never raise.
+6. Make tests pass and commit.
 
 ## Decisions Made
 
@@ -52,6 +59,9 @@ Checkpoint 2 — Pydantic schemas + structured I/O contracts:
 | Alerts fixture included in Checkpoint 1 | The architecture and CLI need alert IDs; generating them alongside sign-ins keeps the simulator self-contained. |
 | Scenario UPNs exposed as `SCENARIO_UPNS` | Tests and later tools need a stable way to locate the 5 planted attack patterns. |
 | `impossibleTravel`/`anonymizedIPAddress`/`unfamiliarFeatures` in `riskEventTypes` | Matches real Graph `signInLogs` risk event taxonomy, so downstream detection stays realistic. |
+| `is_critical_gap` enforced by a model validator | Callers (including the LLM-backed Investigator) cannot claim no critical gap when profile or sign-in history is missing. |
+| Confidence guardrail as a plain function | Pydantic validators run on construction and would block honest low-confidence reports. The orchestrator applies policy explicitly. |
+| `Verdict` as `str, Enum` | Serializes cleanly to JSON and compares naturally with plain strings in tests. |
 
 ## Open Problems
 
@@ -63,3 +73,5 @@ Checkpoint 2 — Pydantic schemas + structured I/O contracts:
 - `f186259` — checkpoint-0: skeleton, venv, pinned deps, pip-audit clean, red-green TDD
 - `5528d5e` — checkpoint-0: update PROGRESS.md
 - `cf443c5` — checkpoint-1: synthetic data generator with 5 MITRE ATT&CK patterns
+- `495f9eb` — checkpoint-1: update PROGRESS.md
+- `d445d00` — checkpoint-2: pydantic schemas, critical-gap rule, confidence guardrail
