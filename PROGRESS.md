@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 3 complete; awaiting Joe's go for Checkpoint 4.
+Updated: Checkpoint 4 complete; awaiting Joe's go for Checkpoint 5.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 3 — complete. Checkpoint 4 — not started (waiting for go).**
+**Checkpoint 4 — complete. Checkpoint 5 — not started (waiting for go).**
 
 ## What's Done
 
@@ -41,6 +41,14 @@ Updated: Checkpoint 3 complete; awaiting Joe's go for Checkpoint 4.
   - `itdr_agent/sim_api.py` exposes `get_user_profile`, `get_sign_in_history`, `get_device_trust`, `get_directory_audits`, `get_risky_user_report` with Graph-shaped payloads.
   - Unknown UPN/device → `None` or `[]`, never a guess.
   - 429/500 only via explicit `injected_error="429"`/`"500"` → `SimulatedGraphError.status_code`; no randomness anywhere. `test_no_errors_without_injection` calls each endpoint 25× to prove it.
+- ✅ Checkpoint 4: Investigator agent (custom ReAct loop).
+  - **Red:** `47e17ec` — tests only; `pytest tests/test_investigator.py` → **14 failed** (module missing).
+  - **Green:** `5121f03` — **14 passed**, full suite **73 passed**.
+  - `itdr_agent/tools.py`: 5 tools (`get_user_profile`, `get_sign_in_history`, `get_device_trust`, `get_directory_audits`, `get_risky_user_report`) + `wrap_tool_output`.
+  - `itdr_agent/investigator.py`: custom loop, cap `MAX_TOOL_CALLS = 8`, retry-once on `SimulatedGraphError`, then record in `data_gaps` and continue.
+  - Dossier factual fields assembled from verbatim tool output; risk indicators and MITRE mapping derived deterministically in code.
+  - `scripts/run_investigator_live.py`: reads `OPENROUTER_API_KEY` from `.env` only, not run in tests, not executed yet.
+  - No new dependency (no smolagents) → dependency set unchanged, pip-audit still clean.
 
 ## Microsoft Graph Schema Sources
 
@@ -78,13 +86,13 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Waiting for Joe's go** before starting Checkpoint 4 (per AGENTS.md rule 9).
+**Waiting for Joe's go** before starting Checkpoint 5 (per AGENTS.md rule 9).
 
-Checkpoint 4 — Investigator agent (tool-calling):
-1. Write failing `tests/test_investigator.py` (red commit first).
-2. Build `itdr_agent/investigator.py` + `itdr_agent/tools.py` over `sim_api`.
-3. Register `get_user_profile`, `get_sign_in_history`, `get_device_trust`, `get_directory_audits`; max 8 tool calls.
-4. Unit tests mock the LLM completely; real-model script is separate.
+Checkpoint 5 — Adjudicator agent (structured reasoning):
+1. Verify a free OpenRouter model exists and document it (open item).
+2. Write failing `tests/test_adjudicator.py` (red commit first).
+3. Build `itdr_agent/adjudicator.py`: single-shot structured output over the dossier.
+4. Apply confidence coercion; require rollback on every containment step.
 5. Green commit, then commit PROGRESS.md.
 
 ## Mistakes & Lessons
@@ -142,6 +150,11 @@ Standing prevention rules distilled from the above:
 | Simulated Graph errors raise `SimulatedGraphError` | Mirrors real Graph HTTP failures so the Investigator's retry logic can be exercised via `injected_error`; `status_code` carries 429/500. |
 | Fixture store "now" = newest synthetic event | Makes `hours` windowing deterministic without a wall clock, keeping tests reproducible. |
 | `get_directory_audits` method name (not `directory_audits`) | Avoids shadowing the store's `directory_audits` list attribute. |
+| **Custom ReAct loop, not smolagents** | Review requires every attempt (including retries) to count toward an exact 8-call cap, retry-once, and data-gap recording. A custom loop makes those semantics explicit and the LLM fully mockable with no network, no extra dependency, no license/pip-audit churn. |
+| **Register `get_risky_user_report` as the 5th tool** | Reverses the earlier "drop it" call: it is the strongest single risk signal and feeds `risk_indicators` and MITRE mapping directly, so keeping it improves the dossier. |
+| Tool output wrapped in `<microsoft_graph_data untrusted="true">` | Tool output is data, not instructions. Prompt-injection text inside a log is serialized and delimited, and the system prompt forbids following it. Tested. |
+| Dossier facts assembled from verbatim tool output | Prevents hallucination: the LLM only chooses which tools to call; sign-in/audit records must match fixtures by id. Risk/MITRE are derived in code. |
+| Retry-once then `data_gaps`; attempts count toward cap | Matches review: persistent 429/500 is retried once, recorded, and investigation continues; persistent failures consume 2 of the 8 calls. |
 
 ## Open Problems
 
@@ -166,3 +179,7 @@ Standing prevention rules distilled from the above:
 - `d022092` — checkpoint-0-fix: skip venv test on a fresh clone instead of failing
 - `9922656` — checkpoint-3: red — simulated Graph layer endpoint and error-injection tests
 - `1e53f2d` — checkpoint-3: green — simulated Graph layer with fixture store and deterministic error injection
+- `54ae871` — checkpoint-3: update PROGRESS.md
+- `747ce5c` — governance: add Mistakes & Lessons log to PROGRESS.md
+- `47e17ec` — checkpoint-4: red — Investigator loop, cap, retry, no-hallucination, prompt-safety tests
+- `5121f03` — checkpoint-4: green — custom ReAct Investigator with 5 tools, retry-once, cap, data-wrapped output
