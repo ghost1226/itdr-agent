@@ -49,6 +49,12 @@ Updated: Checkpoint 4 complete; awaiting Joe's go for Checkpoint 5.
   - Dossier factual fields assembled from verbatim tool output; risk indicators and MITRE mapping derived deterministically in code.
   - `scripts/run_investigator_live.py`: reads `OPENROUTER_API_KEY` from `.env` only, not run in tests, not executed yet.
   - No new dependency (no smolagents) → dependency set unchanged, pip-audit still clean.
+- ✅ Checkpoint 4 fix: MITRE correctness + wrapper hardening.
+  - **Red:** `541047f` — tests only; `pytest tests/test_investigator.py` → **7 failed**.
+  - **Green:** `2d9a680` — **21 passed**, full suite **80 passed**; fixtures regenerated (users 27, sign-ins 118, audits 52).
+  - MITRE derivation is now direction- and time-aware, and every technique carries its evidence ids (`mitre_attack_evidence`).
+  - Tool-data wrapper escapes `<`/`>` (`\u003c`/`\u003e`) so a record cannot close the data block.
+  - Background role changes are initiated only by `ADMIN_UPNS`; scenario users are never baseline role-add targets.
 
 ## Microsoft Graph Schema Sources
 
@@ -110,6 +116,8 @@ mistake made in this project, its root cause, and the rule that prevents it.
 | Stray parentheses in `test_sim_api.py` | Hand-written test, no compile check | Run `py_compile` (or import) on new test files before committing | `9922656` (fixed pre-commit) |
 | Landed first Checkpoint 1 without a red/green split | Did not follow the review process initially | Commit failing tests first (`red`), then code (`green`) | `9f2d832` / `188a293` |
 | Started Checkpoint 2 before Checkpoint 1 fixes | Advanced without waiting for review | AGENTS.md rule 9: stop after each checkpoint, show evidence, wait | AGENTS.md rule 9 |
+| Mapped `T1098.003` from role adds the user merely initiated, with no time window | `_derive` treated any role add the user touched as escalation | Check direction (user must be the target) and confine to the investigation window; tie each technique to evidence ids | `541047f` / `2d9a680` |
+| Tool-data wrapper could be broken out of with `</microsoft_graph_data>` | `json.dumps` leaves `<`/`>` unescaped | Escape `<`/`>` to `\u003c`/`\u003e` so the closing tag appears exactly once | `541047f` / `2d9a680` |
 
 Standing prevention rules distilled from the above:
 1. Verify external facts (schemas, enum values, technique IDs) against the
@@ -155,6 +163,10 @@ Standing prevention rules distilled from the above:
 | Tool output wrapped in `<microsoft_graph_data untrusted="true">` | Tool output is data, not instructions. Prompt-injection text inside a log is serialized and delimited, and the system prompt forbids following it. Tested. |
 | Dossier facts assembled from verbatim tool output | Prevents hallucination: the LLM only chooses which tools to call; sign-in/audit records must match fixtures by id. Risk/MITRE are derived in code. |
 | Retry-once then `data_gaps`; attempts count toward cap | Matches review: persistent 429/500 is retried once, recorded, and investigation continues; persistent failures consume 2 of the 8 calls. |
+| MITRE derivation is windowed and direction-aware | Only in-window events count; `T1098.003` requires the investigated user to be the **target** of the role add. Being the initiator yields indicator "user granted a role to another account" and no escalation claim. |
+| Each technique stores evidence ids (`mitre_attack_evidence`) | The Adjudicator can verify every MITRE claim against the exact sign-in/audit record it came from. |
+| Tool wrapper escapes `<`/`>` | A log field containing `</microsoft_graph_data>` cannot break out of the untrusted-data block. |
+| Background role changes only by `ADMIN_UPNS` | Ordinary staff (e.g. Sales) initiating role changes must not look like an attack; role adds are IT-admin noise, and baseline role targets exclude scenario users. |
 
 ## Open Problems
 
@@ -183,3 +195,6 @@ Standing prevention rules distilled from the above:
 - `747ce5c` — governance: add Mistakes & Lessons log to PROGRESS.md
 - `47e17ec` — checkpoint-4: red — Investigator loop, cap, retry, no-hallucination, prompt-safety tests
 - `5121f03` — checkpoint-4: green — custom ReAct Investigator with 5 tools, retry-once, cap, data-wrapped output
+- `f5f7ed3` — checkpoint-4: update PROGRESS.md with agent-loop and tool decisions
+- `541047f` — checkpoint-4-fix: red — MITRE direction/window/evidence tests and wrapper-breakout test
+- `2d9a680` — checkpoint-4-fix: green — direction/time-aware MITRE with evidence ids, escaped wrapper, admin-only role noise
