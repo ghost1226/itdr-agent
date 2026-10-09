@@ -4,6 +4,18 @@ Red-green TDD: these tests define the contract for the synthetic
 Microsoft Entra ID dataset before the generator exists.
 
 All data is synthetic. Nothing here touches real logs or tenants.
+
+Graph schema references (field names follow Microsoft's published shapes):
+  * signIn resource (v1.0): riskEventTypes_v2, riskDetail,
+    riskLevelAggregated, riskLevelDuringSignIn, status, deviceDetail,
+    location, clientAppUsed, conditionalAccessStatus.
+    https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0
+  * mfaDetail is a beta signIn field.
+    https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta
+  * directoryAudit resource (v1.0): activityDateTime, activityDisplayName,
+    category, correlationId, initiatedBy, targetResources, result,
+    resultReason, loggedByService.
+    https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0
 """
 
 from __future__ import annotations
@@ -27,15 +39,17 @@ SIGNIN_REQUIRED = {
     "userPrincipalName": str,
     "appDisplayName": str,
     "ipAddress": str,
-    "location": dict,
-    "status": dict,
-    "riskState": str,
-    "riskLevel": str,
-    "riskEventTypes": list,
-    "conditionalAccessStatus": str,
-    "deviceDetail": dict,
     "clientAppUsed": str,
     "correlationId": str,
+    "conditionalAccessStatus": str,
+    "riskDetail": str,
+    "riskLevelAggregated": str,
+    "riskLevelDuringSignIn": str,
+    "riskState": str,
+    "riskEventTypes_v2": list,
+    "status": dict,
+    "deviceDetail": dict,
+    "location": dict,
 }
 
 LOCATION_REQUIRED = {
@@ -92,21 +106,26 @@ ALERT_REQUIRED = {
     "appDisplayName": str,
     "ipAddress": str,
     "location": dict,
-    "riskLevel": str,
+    "riskLevelAggregated": str,
     "riskState": str,
-    "riskEventTypes": list,
+    "riskEventTypes_v2": list,
     "status": dict,
     "scenario": str,
 }
 
-# Five planted MITRE ATT&CK patterns.
-SCENARIOS = {
+# Every user/email must live in the synthetic domain.
+SYNTHETIC_DOMAIN = "contoso.com"
+
+# Five planted MITRE ATT&CK patterns and their expected technique IDs.
+MITRE_EXPECTED = {
     "impossible_travel": "T1078",
     "mfa_fatigue": "T1621",
-    "anonymous_ip": "T1090",
-    "app_consent": "T1550.001",
-    "privilege_escalation": "T1098",
+    "anonymous_ip": "T1090.003",
+    "app_consent": "T1528",
+    "privilege_escalation": "T1098.003",
 }
+
+ATTACK_PATTERNS = list(MITRE_EXPECTED)
 
 
 def _assert_shape(record: dict, required: dict, label: str) -> None:
@@ -118,7 +137,7 @@ def _assert_shape(record: dict, required: dict, label: str) -> None:
         )
 
 
-# --- Fixture / dataset fixture --------------------------------------------
+# --- Fixtures --------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +154,7 @@ def scenario_upns():
     return data_generator.SCENARIO_UPNS
 
 
-# --- Users ----------------------------------------------------------------
+# --- Users -----------------------------------------------------------------
 
 
 def test_users_have_required_fields(dataset):
@@ -150,7 +169,7 @@ def test_users_are_unique(dataset):
     assert len(upns) == len(set(upns)), "UPNs must be unique"
 
 
-# --- Sign-in logs ---------------------------------------------------------
+# --- Sign-in logs ----------------------------------------------------------
 
 
 def test_signins_have_required_schema(dataset):
@@ -164,7 +183,6 @@ def test_signins_have_required_schema(dataset):
         )
         _assert_shape(event["status"], STATUS_REQUIRED, "signin.status")
         _assert_shape(event["deviceDetail"], DEVICE_REQUIRED, "signin.device")
-        # createdDateTime must be a parseable ISO-8601 timestamp.
         datetime.fromisoformat(event["createdDateTime"].replace("Z", "+00:00"))
 
 
@@ -174,7 +192,7 @@ def test_signins_reference_known_users(dataset):
         assert event["userPrincipalName"] in known
 
 
-# --- Directory audits -----------------------------------------------------
+# --- Directory audits ------------------------------------------------------
 
 
 def test_directory_audits_have_required_schema(dataset):
@@ -190,7 +208,41 @@ def test_directory_audits_have_required_schema(dataset):
         )
 
 
-# --- Determinism ----------------------------------------------------------
+# --- Synthetic domain ------------------------------------------------------
+
+
+def _upn_fields(record: dict):
+    for key, value in record.items():
+        if "PrincipalName" in key and isinstance(value, str):
+            yield key, value
+        elif key == "targetResources" and isinstance(value, list):
+            for target in value:
+                if "userPrincipalName" in target:
+                    yield "targetResources.userPrincipalName", target[
+                        "userPrincipalName"
+                    ]
+
+
+def test_every_user_and_email_uses_the_synthetic_domain(dataset):
+    saw_a_upn = False
+    for group in ("users", "sign_ins", "directory_audits", "alerts"):
+        for record in dataset[group]:
+            for key, value in _upn_fields(record):
+                saw_a_upn = True
+                assert value.endswith(f"@{SYNTHETIC_DOMAIN}"), (
+                    f"{group}.{key} leaks non-synthetic domain: {value!r}"
+                )
+    assert saw_a_upn, "no userPrincipalName fields were found to check"
+
+
+def test_no_non_synthetic_domains_appear_anywhere(dataset):
+    blob = json.dumps(dataset)
+    # Common Faker / example domains must never appear.
+    for leak in ("@example.com", "@example.org", "@gmail.com", "@contoso.onmicrosoft.com"):
+        assert leak not in blob, f"synthetic data leaked {leak}"
+
+
+# --- Determinism -----------------------------------------------------------
 
 
 def test_generation_is_deterministic():
@@ -209,23 +261,58 @@ def test_different_seeds_differ():
     assert a != b
 
 
+def test_same_seed_is_byte_identical(tmp_path):
+    from itdr_agent import data_generator
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    data_generator.write_fixtures(first, seed=42)
+    data_generator.write_fixtures(second, seed=42)
+    for name in ("users", "sign_ins", "directory_audits", "alerts"):
+        a = (first / f"{name}.jsonl").read_bytes()
+        b = (second / f"{name}.jsonl").read_bytes()
+        assert a == b, f"{name}.jsonl differs between identical seeds"
+
+
+def test_different_seeds_produce_different_bytes(tmp_path):
+    from itdr_agent import data_generator
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    data_generator.write_fixtures(first, seed=42)
+    data_generator.write_fixtures(second, seed=43)
+    assert (first / "sign_ins.jsonl").read_bytes() != (
+        second / "sign_ins.jsonl"
+    ).read_bytes()
+
+
 # --- Planted MITRE ATT&CK patterns ----------------------------------------
 
 
 def test_all_five_scenarios_are_present(dataset, scenario_upns):
-    assert set(scenario_upns) == set(SCENARIOS), "expected exactly five scenarios"
+    from itdr_agent import data_generator
+
+    assert set(scenario_upns) == set(MITRE_EXPECTED), "expected exactly five scenarios"
     known = {u["userPrincipalName"] for u in dataset["users"]}
     for scenario, upn in scenario_upns.items():
         assert upn in known, f"scenario user {upn} missing from users"
+        assert (
+            data_generator.SCENARIO_TECHNIQUES[scenario]
+            == MITRE_EXPECTED[scenario]
+        ), f"{scenario} maps to the wrong MITRE technique"
 
 
 def test_impossible_travel_pattern(dataset, scenario_upns):
-    upn = scenario_upns["impossible_travel"]
+    from itdr_agent import data_generator
+
+    scenario = "impossible_travel"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1078"
+    upn = scenario_upns[scenario]
     events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
     travel = [
-        e for e in events if "impossibleTravel" in e["riskEventTypes"]
+        e for e in events if "unlikelyTravel" in e["riskEventTypes_v2"]
     ]
-    assert len(travel) >= 2, "expected two impossible-travel sign-ins"
+    assert len(travel) >= 2, "expected two unlikely-travel sign-ins"
     travel.sort(key=lambda e: e["createdDateTime"])
     first, second = travel[0], travel[1]
     assert first["location"]["countryOrRegion"] != second["location"]["countryOrRegion"]
@@ -235,41 +322,47 @@ def test_impossible_travel_pattern(dataset, scenario_upns):
 
 
 def test_mfa_fatigue_pattern(dataset, scenario_upns):
-    upn = scenario_upns["mfa_fatigue"]
-    events = [
-        e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn
-    ]
+    from itdr_agent import data_generator
+
+    scenario = "mfa_fatigue"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1621"
+    upn = scenario_upns[scenario]
+    events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
     events.sort(key=lambda e: e["createdDateTime"])
-    failures = [
-        e for e in events if "MFA" in e["status"]["failureReason"]
-    ]
+    failures = [e for e in events if "MFA" in e["status"]["failureReason"]]
     assert len(failures) >= 3, "expected repeated MFA failures"
-    # A successful sign-in follows the fatigue burst.
     last_failure_time = failures[-1]["createdDateTime"]
     successes = [
         e
         for e in events
-        if e["status"]["errorCode"] == 0
-        and e["createdDateTime"] > last_failure_time
+        if e["status"]["errorCode"] == 0 and e["createdDateTime"] > last_failure_time
     ]
     assert successes, "expected a success after the MFA fatigue burst"
 
 
 def test_anonymous_ip_pattern(dataset, scenario_upns):
-    upn = scenario_upns["anonymous_ip"]
+    from itdr_agent import data_generator
+
+    scenario = "anonymous_ip"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1090.003"
+    upn = scenario_upns[scenario]
     events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
-    anon = [e for e in events if "anonymizedIPAddress" in e["riskEventTypes"]]
-    assert anon, "expected an anonymizing-proxy sign-in"
-    assert any(e["riskLevel"] in {"medium", "high"} for e in anon)
+    anon = [e for e in events if "anonymizedIPAddress" in e["riskEventTypes_v2"]]
+    assert anon, "expected an anonymizing-proxy sign-in in riskEventTypes_v2"
+    assert any(e["riskLevelAggregated"] in {"medium", "high"} for e in anon)
 
 
 def test_app_consent_after_foreign_signin_pattern(dataset, scenario_upns):
-    upn = scenario_upns["app_consent"]
+    from itdr_agent import data_generator
+
+    scenario = "app_consent"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1528"
+    upn = scenario_upns[scenario]
     sign_ins = [
         e
         for e in dataset["sign_ins"]
         if e["userPrincipalName"] == upn
-        and "unfamiliarFeatures" in e["riskEventTypes"]
+        and "unfamiliarFeatures" in e["riskEventTypes_v2"]
     ]
     assert sign_ins, "expected an anomalous foreign sign-in"
     anomalous_time = max(e["createdDateTime"] for e in sign_ins)
@@ -286,7 +379,11 @@ def test_app_consent_after_foreign_signin_pattern(dataset, scenario_upns):
 
 
 def test_privilege_escalation_pattern(dataset, scenario_upns):
-    upn = scenario_upns["privilege_escalation"]
+    from itdr_agent import data_generator
+
+    scenario = "privilege_escalation"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1098.003"
+    upn = scenario_upns[scenario]
     escalations = [
         a
         for a in dataset["directory_audits"]
@@ -297,22 +394,22 @@ def test_privilege_escalation_pattern(dataset, scenario_upns):
     assert escalations, "expected a role-assignment escalation audit"
 
 
-# --- Alerts ---------------------------------------------------------------
+# --- Alerts ----------------------------------------------------------------
 
 
 def test_alerts_have_required_schema(dataset):
     alerts = dataset["alerts"]
-    assert len(alerts) == len(SCENARIOS)
+    assert len(alerts) == len(MITRE_EXPECTED)
     ids = {a["id"] for a in alerts}
     assert "ALERT_001" in ids
     for alert in alerts:
         _assert_shape(alert, ALERT_REQUIRED, "alert")
-        assert alert["scenario"] in SCENARIOS
+        assert alert["scenario"] in MITRE_EXPECTED
         _assert_shape(alert["location"], LOCATION_REQUIRED, "alert.location")
         _assert_shape(alert["status"], STATUS_REQUIRED, "alert.status")
 
 
-# --- Persistence ----------------------------------------------------------
+# --- Persistence -----------------------------------------------------------
 
 
 def test_write_fixtures_creates_jsonl(tmp_path):
@@ -328,6 +425,5 @@ def test_write_fixtures_creates_jsonl(tmp_path):
             if line.strip()
         ]
         assert lines, f"fixture {path} is empty"
-        # Every line must be valid JSON with an id and userPrincipalName where relevant.
         for record in lines:
             assert "id" in record
