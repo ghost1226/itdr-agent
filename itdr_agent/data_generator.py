@@ -40,6 +40,10 @@ BASE_TIME = datetime(2025, 1, 15, 9, 0, 0, tzinfo=timezone.utc)
 # The only domain allowed in synthetic identity data.
 SYNTHETIC_DOMAIN = "contoso.com"
 
+# Privileged accounts. Background role changes are always initiated by one
+# of these, so ordinary staff never look like they escalated a role.
+ADMIN_UPNS: list[str] = ["it.admin@contoso.com", "sec.admin@contoso.com"]
+
 # Public contract: scenario -> synthetic UPN. Tests key off this.
 SCENARIO_UPNS: dict[str, str] = {
     "impossible_travel": f"alice.traveler@{SYNTHETIC_DOMAIN}",
@@ -210,6 +214,12 @@ def _generate_users(rng: random.Random, fake: Faker) -> list[dict]:
         name = fake.name()
         upn = f"user{i:02d}@{SYNTHETIC_DOMAIN}"
         users.append(_user_record(fake, rng, upn, name))
+    for upn in ADMIN_UPNS:
+        display = upn.split("@")[0].replace(".", " ").title()
+        record = _user_record(fake, rng, upn, display)
+        record["department"] = "IT"
+        record["jobTitle"] = "Administrator"
+        users.append(record)
     return users
 
 
@@ -390,7 +400,7 @@ def _plant_scenario_audits(
         created=BASE_TIME + timedelta(minutes=60),
         activity="Add member to role",
         category="RoleManagement",
-        initiator=erin,
+        initiator=by_upn[ADMIN_UPNS[0]],
         targets=[
             {
                 "id": _new_id(rng),
@@ -424,10 +434,18 @@ def _baseline_audits(
         ("Update conditional access policy", "Policy", "Policy updated."),
     ]
     audits: list[dict] = []
+    admin_users = [u for u in users if u["userPrincipalName"] in ADMIN_UPNS]
+    role_targets = [
+        u for u in users if u["userPrincipalName"] not in SCENARIO_UPNS.values()
+    ]
     for _ in range(count):
-        actor = rng.choice(users)
-        target = rng.choice(users)
         activity, category, reason = rng.choice(templates)
+        if category == "RoleManagement":
+            actor = rng.choice(admin_users)
+            target = rng.choice(role_targets)
+        else:
+            actor = rng.choice(users)
+            target = rng.choice(users)
         targets = [
             {
                 "id": target["id"],

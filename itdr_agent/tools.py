@@ -44,8 +44,13 @@ def call_tool(name: str, arguments: dict[str, Any]) -> Any:
 
 
 def wrap_tool_output(name: str, payload: Any) -> str:
-    """Serialize tool output as clearly-delimited, untrusted data."""
+    """Serialize tool output as clearly-delimited, untrusted data.
+
+    ``<`` and ``>`` are escaped so a record containing the closing tag
+    cannot break out of the data block. The body remains valid JSON.
+    """
     body = json.dumps(payload, sort_keys=True, default=str)
+    body = body.replace("<", "\\u003c").replace(">", "\\u003e")
     return (
         f'<microsoft_graph_data tool="{name}" untrusted="true">\n'
         f"{body}\n"

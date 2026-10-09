@@ -35,6 +35,7 @@ class InvestigatorOutput(BaseModel):
     directory_audits: list[dict[str, Any]] = Field(default_factory=list)
     risk_indicators: list[str] = Field(default_factory=list)
     mitre_attack_mapping: list[str] = Field(default_factory=list)
+    mitre_attack_evidence: dict[str, list[str]] = Field(default_factory=dict)
     data_gaps: list[str] = Field(default_factory=list)
     is_critical_gap: bool = False
 

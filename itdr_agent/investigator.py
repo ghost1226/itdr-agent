@@ -11,11 +11,20 @@ The LLM chooses *which* tools to call. The dossier's factual fields
 (profile, sign-ins, device, audits) are assembled only from verbatim tool
 output, so the agent cannot invent evidence. Risk indicators and MITRE
 mapping are derived deterministically in code.
+
+MITRE derivation is direction- and time-aware:
+  * only events inside the investigation window around the alert count;
+  * ``T1098.003`` is mapped only when the investigated user is the TARGET
+    of a role assignment — if they are merely the initiator, a separate
+    indicator is recorded and no escalation is claimed;
+  * every technique is stored with the evidence record id(s) that produced
+    it, so the Adjudicator can check the claim.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from .schemas import InvestigatorOutput
@@ -24,15 +33,27 @@ from .tools import TOOL_SPECS, call_tool, wrap_tool_output
 
 MAX_TOOL_CALLS = 8
 
+# Look-back/look-forward window around the alert, in hours.
+INVESTIGATION_WINDOW_HOURS = 48
+
 MITRE_BY_RISK_EVENT = {
     "unlikelyTravel": "T1078",
     "anonymizedIPAddress": "T1090.003",
 }
-MITRE_BY_ACTIVITY = {
-    "Consent to application": "T1528",
-    "Add member to role": "T1098.003",
-}
 MFA_TECHNIQUE = "T1621"
+CONSENT_TECHNIQUE = "T1528"
+ROLE_ESCALATION_TECHNIQUE = "T1098.003"
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _alert_time(alert: dict[str, Any]) -> datetime:
+    value = alert.get("createdDateTime")
+    if value:
+        return _parse_time(value)
+    return datetime.now(timezone.utc)
 
 
 def build_system_prompt() -> str:
@@ -131,7 +152,9 @@ class Investigator:
         if not evidence["sign_in_history"]:
             data_gaps.append(f"No sign-in history returned for {upn}.")
 
-        indicators, mitre = _derive(evidence)
+        indicators, mitre_evidence = derive_indicators(
+            evidence, upn, _alert_time(alert)
+        )
         return InvestigatorOutput(
             alert_id=alert.get("id", ""),
             user_principal_name=upn,
@@ -146,7 +169,8 @@ class Investigator:
                 key=lambda a: a["activityDateTime"],
             ),
             risk_indicators=indicators,
-            mitre_attack_mapping=mitre,
+            mitre_attack_mapping=list(mitre_evidence.keys()),
+            mitre_attack_evidence=mitre_evidence,
             data_gaps=data_gaps,
         )
 
@@ -202,33 +226,71 @@ def _extend_unique(target: list[dict], items: list[dict]) -> None:
             seen.add(item["id"])
 
 
-def _derive(evidence: dict[str, Any]) -> tuple[list[str], list[str]]:
-    indicators: set[str] = set()
-    mitre: set[str] = set()
+def derive_indicators(
+    evidence: dict[str, Any], upn: str, alert_time: datetime
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Derive risk indicators and MITRE techniques from in-window evidence.
 
-    for event in evidence["sign_in_history"]:
+    Returns ``(indicators, mitre_evidence)`` where ``mitre_evidence`` maps a
+    technique id to the sorted evidence record ids that produced it.
+    """
+    window = timedelta(hours=INVESTIGATION_WINDOW_HOURS)
+    start, end = alert_time - window, alert_time + window
+    indicators: set[str] = set()
+    mitre: dict[str, list[str]] = {}
+
+    def record(technique: str, evidence_id: str) -> None:
+        mitre.setdefault(technique, [])
+        if evidence_id not in mitre[technique]:
+            mitre[technique].append(evidence_id)
+
+    for event in evidence.get("sign_in_history", []):
+        when = _parse_time(event["createdDateTime"])
+        if not start <= when <= end:
+            continue
         for risk_type in event.get("riskEventTypes_v2", []):
             indicators.add(risk_type)
             if risk_type in MITRE_BY_RISK_EVENT:
-                mitre.add(MITRE_BY_RISK_EVENT[risk_type])
+                record(MITRE_BY_RISK_EVENT[risk_type], event["id"])
         status = event.get("status", {})
         if status.get("errorCode", 0) != 0 and "MFA" in status.get(
             "failureReason", ""
         ):
             indicators.add("mfaFatigue")
-            mitre.add(MFA_TECHNIQUE)
+            record(MFA_TECHNIQUE, event["id"])
 
-    report = evidence["risky_user_report"]
+    report = evidence.get("risky_user_report")
     if report:
         for risk_type in report.get("riskEventTypes_v2", []):
             indicators.add(risk_type)
-            if risk_type in MITRE_BY_RISK_EVENT:
-                mitre.add(MITRE_BY_RISK_EVENT[risk_type])
 
-    for audit in evidence["directory_audits"]:
+    for audit in evidence.get("directory_audits", []):
+        when = _parse_time(audit["activityDateTime"])
+        if not start <= when <= end:
+            continue
         activity = audit.get("activityDisplayName")
-        if activity in MITRE_BY_ACTIVITY:
+        if activity == "Consent to application":
             indicators.add(activity)
-            mitre.add(MITRE_BY_ACTIVITY[activity])
+            record(CONSENT_TECHNIQUE, audit["id"])
+        elif activity == "Add member to role":
+            targets = audit.get("targetResources", [])
+            is_target = any(
+                t.get("type") == "User" and t.get("userPrincipalName") == upn
+                for t in targets
+            )
+            is_initiator = (
+                audit.get("initiatedBy", {})
+                .get("user", {})
+                .get("userPrincipalName")
+                == upn
+            )
+            if is_target:
+                indicators.add("privilegeEscalation")
+                record(ROLE_ESCALATION_TECHNIQUE, audit["id"])
+            elif is_initiator:
+                # They changed someone else's role — suspicious, but not
+                # evidence that *they* were escalated.
+                indicators.add("user granted a role to another account")
 
-    return sorted(indicators), sorted(mitre)
+    mitre = {key: sorted(value) for key, value in sorted(mitre.items())}
+    return sorted(indicators), mitre
