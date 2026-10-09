@@ -40,15 +40,25 @@ def test_config_module_exists():
     from itdr_agent import config  # noqa: F401
 
 
-def test_timeout_default():
-    """TIMEOUT_SECONDS defaults to 120 when not in environment."""
+def test_timeout_default(monkeypatch):
+    """TIMEOUT_SECONDS defaults to 120 when not in the environment or .env.
+
+    Clear the env var first, and neutralise dotenv loading so a developer's
+    real .env cannot leak into this default-value test.
+    """
+    monkeypatch.delenv("TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ITDR_TIMEOUT", raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: None)
+    import importlib
     from itdr_agent import config
+    importlib.reload(config)
     assert config.TIMEOUT_SECONDS == 120
 
 
 def test_timeout_reads_from_env(monkeypatch):
     """TIMEOUT_SECONDS respects the .env override."""
     monkeypatch.setenv("TIMEOUT_SECONDS", "90")
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: None)
     import importlib
     from itdr_agent import config
     importlib.reload(config)
