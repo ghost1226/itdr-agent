@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 1 revised to review notes; Checkpoint 2 complete.
+Updated: Checkpoint 3 complete; awaiting Joe's go for Checkpoint 4.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 3 — not started.**
+**Checkpoint 3 — complete. Checkpoint 4 — not started (waiting for go).**
 
 ## What's Done
 
@@ -33,6 +33,14 @@ Updated: Checkpoint 1 revised to review notes; Checkpoint 2 complete.
   - `ALERT_002` (MFA fatigue) now references an actual MFA-denied sign-in; `ALERT_005` (privilege escalation) references a risky session and is `atRisk`, instead of pointing at benign baseline sign-ins.
   - Review items 1–5 (openai 3.26.1, timeout `monkeypatch.delenv`, `riskEventTypes_v2`, corrected MITRE IDs, `@contoso.com` test) were already landed in `19ec859`, `9f2d832`, and `188a293`; this fix closes the remaining alert-matching gap.
 - ✅ Governance: added AGENTS.md rule 9 — after each checkpoint, stop, show evidence, and wait for Joe's go before starting the next.
+- ✅ Checkpoint 0 fix: `test_venv_exists` now skips on a fresh clone (no `.venv`) instead of failing. Commit `d022092`.
+- ✅ Checkpoint 3: Simulated Microsoft Graph layer.
+  - **Red:** `9922656` — tests only; `pytest tests/test_sim_api.py` → **15 failed** (module missing).
+  - **Green:** `1e53f2d` — **15 passed**, full suite **59 passed**.
+  - `itdr_agent/fixture_store.py` loads the committed JSONL fixtures (or regenerates from seed if absent) and indexes users/sign-ins/devices.
+  - `itdr_agent/sim_api.py` exposes `get_user_profile`, `get_sign_in_history`, `get_device_trust`, `get_directory_audits`, `get_risky_user_report` with Graph-shaped payloads.
+  - Unknown UPN/device → `None` or `[]`, never a guess.
+  - 429/500 only via explicit `injected_error="429"`/`"500"` → `SimulatedGraphError.status_code`; no randomness anywhere. `test_no_errors_without_injection` calls each endpoint 25× to prove it.
 
 ## Microsoft Graph Schema Sources
 
@@ -70,15 +78,14 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Waiting for Joe's go** before starting Checkpoint 3 (per AGENTS.md rule 9).
+**Waiting for Joe's go** before starting Checkpoint 4 (per AGENTS.md rule 9).
 
-Checkpoint 3 — MS Graph simulation layer:
-1. Write failing `tests/test_sim_api.py` (red commit first).
-2. Build `itdr_agent/fixture_store.py` to load/query committed JSONL fixtures.
-3. Build `itdr_agent/sim_api.py` exposing the five Graph-shaped endpoints.
-4. Support deterministic error injection (`injected_error` param) for 429/500.
-5. Unknown IDs return `None`/empty lists, never raise.
-6. Green commit, then commit PROGRESS.md.
+Checkpoint 4 — Investigator agent (tool-calling):
+1. Write failing `tests/test_investigator.py` (red commit first).
+2. Build `itdr_agent/investigator.py` + `itdr_agent/tools.py` over `sim_api`.
+3. Register `get_user_profile`, `get_sign_in_history`, `get_device_trust`, `get_directory_audits`; max 8 tool calls.
+4. Unit tests mock the LLM completely; real-model script is separate.
+5. Green commit, then commit PROGRESS.md.
 
 ## Decisions Made
 
@@ -108,6 +115,9 @@ Checkpoint 3 — MS Graph simulation layer:
 | `Verdict` as `str, Enum` | Serializes cleanly to JSON and compares naturally with plain strings in tests. |
 | Red-green commits from Checkpoint 1 onward | Review requirement: failing tests are committed first (`checkpoint-1: red`), then the code (`checkpoint-1: green`). |
 | Scenario-aware alert selection | Each alert's `riskEventTypes_v2`/`status` must point at the sign-in that demonstrates its pattern, or the downstream Investigator gets a meaningless trigger. |
+| Simulated Graph errors raise `SimulatedGraphError` | Mirrors real Graph HTTP failures so the Investigator's retry logic can be exercised via `injected_error`; `status_code` carries 429/500. |
+| Fixture store "now" = newest synthetic event | Makes `hours` windowing deterministic without a wall clock, keeping tests reproducible. |
+| `get_directory_audits` method name (not `directory_audits`) | Avoids shadowing the store's `directory_audits` list attribute. |
 
 ## Open Problems
 
@@ -128,3 +138,7 @@ Checkpoint 3 — MS Graph simulation layer:
 - `9d2a539` — checkpoint-1: update PROGRESS.md with Graph sources, MITRE checklist, red/green commits
 - `86976df` — checkpoint-1-fix: red — alerts must reference their planted pattern evidence
 - `d5cdcec` — checkpoint-1-fix: green — scenario-aware alert selection points at real pattern evidence
+- `5de4076` — checkpoint-1-fix: docs — AGENTS.md stop-and-wait rule, update PROGRESS.md
+- `d022092` — checkpoint-0-fix: skip venv test on a fresh clone instead of failing
+- `9922656` — checkpoint-3: red — simulated Graph layer endpoint and error-injection tests
+- `1e53f2d` — checkpoint-3: green — simulated Graph layer with fixture store and deterministic error injection
