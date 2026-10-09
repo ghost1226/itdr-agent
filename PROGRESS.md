@@ -87,6 +87,30 @@ Checkpoint 4 — Investigator agent (tool-calling):
 4. Unit tests mock the LLM completely; real-model script is separate.
 5. Green commit, then commit PROGRESS.md.
 
+## Mistakes & Lessons
+
+Institutional log so future sessions do not repeat these. Each row is a real
+mistake made in this project, its root cause, and the rule that prevents it.
+
+| Mistake | Root cause | Prevention rule | Fixed in |
+|---------|------------|-----------------|----------|
+| Wrong MITRE IDs (T1090/T1550.001/T1098) | Wrote from memory instead of checking ATT&CK | Verify every technique ID against the ATT&CK source before coding | `9f2d832` / `188a293` |
+| Invented Graph fields (`riskEventTypes`, `riskLevel`) | Trusted PLAN prose over the real schema | Check every field on Microsoft Learn; use `riskEventTypes_v2`, `riskLevelAggregated`, `riskLevelDuringSignIn` | `9f2d832` / `188a293` |
+| Wrong risk enum value `impossibleTravel` | Did not read the documented enum | Use the documented value (`unlikelyTravel`) | `188a293` |
+| Alerts pointed at benign baseline sign-ins | Generic "first match" source selection | Each trigger/alert must reference the sign-in that demonstrates its pattern | `86976df` / `d5cdcec` |
+| `directory_audits` attribute shadowed its method | Same name used for data and accessor | Name accessors `get_*` so they cannot collide with data attributes | `1e53f2d` (caught pre-commit) |
+| Stray parentheses in `test_sim_api.py` | Hand-written test, no compile check | Run `py_compile` (or import) on new test files before committing | `9922656` (fixed pre-commit) |
+| Landed first Checkpoint 1 without a red/green split | Did not follow the review process initially | Commit failing tests first (`red`), then code (`green`) | `9f2d832` / `188a293` |
+| Started Checkpoint 2 before Checkpoint 1 fixes | Advanced without waiting for review | AGENTS.md rule 9: stop after each checkpoint, show evidence, wait | AGENTS.md rule 9 |
+
+Standing prevention rules distilled from the above:
+1. Verify external facts (schemas, enum values, technique IDs) against the
+   primary source before writing code — never from memory or prose.
+2. Every test file must compile/import before it is committed.
+3. Watch for attribute/method name collisions; accessors use a `get_` prefix.
+4. Synthetic triggers must point at the evidence that proves their pattern.
+5. Red-green from the first commit; stop and wait after each checkpoint.
+
 ## Decisions Made
 
 | Decision | Why |
