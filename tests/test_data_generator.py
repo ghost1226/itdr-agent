@@ -409,6 +409,32 @@ def test_alerts_have_required_schema(dataset):
         _assert_shape(alert["status"], STATUS_REQUIRED, "alert.status")
 
 
+def test_alerts_reference_their_planted_evidence(dataset, scenario_upns):
+    """Each alert must point at a sign-in that actually shows its pattern.
+
+    Alerts whose risk evidence is an MFA failure burst or a directory role
+    change must still carry a matching signal, not a benign baseline sign-in.
+    """
+    alerts = {a["scenario"]: a for a in dataset["alerts"]}
+    risk_typed = {
+        "impossible_travel": "unlikelyTravel",
+        "anonymous_ip": "anonymizedIPAddress",
+        "app_consent": "unfamiliarFeatures",
+    }
+    for scenario, expected in risk_typed.items():
+        assert expected in alerts[scenario]["riskEventTypes_v2"], (
+            f"{scenario} alert does not carry {expected}"
+        )
+    fatigue = alerts["mfa_fatigue"]
+    assert "MFA" in fatigue["status"]["failureReason"], (
+        "mfa_fatigue alert must reference an MFA-denied sign-in"
+    )
+    assert fatigue["status"]["errorCode"] != 0
+    assert alerts["privilege_escalation"]["riskState"] == "atRisk", (
+        "privilege_escalation alert must be flagged risky"
+    )
+
+
 # --- Persistence -----------------------------------------------------------
 
 
