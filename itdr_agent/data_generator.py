@@ -334,6 +334,25 @@ def _plant_scenario_signins(
             managed_device=False,
         )
     )
+
+    # 5. Privilege escalation (T1098.003): the role change follows a risky
+    # session, so the alert has a real sign-in to point at.
+    erin = by_upn[SCENARIO_UPNS["privilege_escalation"]]
+    events.append(
+        _signin(
+            rng,
+            user=erin,
+            created=BASE_TIME + timedelta(minutes=50),
+            location=_location("Lagos", "Lagos", "NG", 6.5244, 3.3792),
+            ip="102.89.34.78",
+            risk_state="atRisk",
+            risk_level_aggregated="high",
+            risk_level_during_sign_in="high",
+            risk_event_types=["unfamiliarFeatures"],
+            ca_status="failure",
+            managed_device=False,
+        )
+    )
     return events
 
 
@@ -445,17 +464,27 @@ def _baseline_audits(
     return audits
 
 
+def _alert_source(scenario: str, upn: str, sign_ins: list[dict]) -> dict:
+    """Pick the sign-in that actually demonstrates each planted pattern."""
+    events = [e for e in sign_ins if e["userPrincipalName"] == upn]
+    if scenario == "impossible_travel":
+        return next(e for e in events if "unlikelyTravel" in e["riskEventTypes_v2"])
+    if scenario == "anonymous_ip":
+        return next(e for e in events if "anonymizedIPAddress" in e["riskEventTypes_v2"])
+    if scenario == "app_consent":
+        return next(e for e in events if "unfamiliarFeatures" in e["riskEventTypes_v2"])
+    if scenario == "mfa_fatigue":
+        return next(e for e in events if "MFA" in e["status"]["failureReason"])
+    # privilege_escalation: point at its risky session.
+    return next(e for e in events if e["riskState"] == "atRisk")
+
+
 def _generate_alerts(
     rng: random.Random, sign_ins: list[dict]
 ) -> list[dict]:
     alerts: list[dict] = []
     for index, (scenario, upn) in enumerate(SCENARIO_UPNS.items(), start=1):
-        candidates = [
-            e for e in sign_ins if e["userPrincipalName"] == upn and e["riskEventTypes_v2"]
-        ]
-        source = candidates[0] if candidates else next(
-            e for e in sign_ins if e["userPrincipalName"] == upn
-        )
+        source = _alert_source(scenario, upn, sign_ins)
         alerts.append(
             {
                 "id": f"ALERT_{index:03d}",
