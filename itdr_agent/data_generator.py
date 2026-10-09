@@ -6,6 +6,21 @@ attack patterns are planted deterministically so downstream agents can
 find them.
 
 No real tenant, no real logs. Everything here is fabricated.
+
+Field names follow Microsoft's published Graph shapes:
+  * signIn (v1.0): riskEventTypes_v2, riskDetail, riskLevelAggregated,
+    riskLevelDuringSignIn, riskState, status, deviceDetail, location,
+    clientAppUsed, conditionalAccessStatus.
+    https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0
+    Anonymous IP surfaces as riskEventTypes_v2 == ["anonymizedIPAddress"];
+    impossible travel as ["unlikelyTravel"]. riskEventTypes exists but is
+    deprecated, so it is deliberately not emitted.
+  * mfaDetail (beta signIn):
+    https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta
+  * directoryAudit (v1.0): activityDateTime, activityDisplayName, category,
+    correlationId, initiatedBy, targetResources, result, resultReason,
+    loggedByService.
+    https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0
 """
 
 from __future__ import annotations
@@ -22,22 +37,25 @@ from faker import Faker
 DEFAULT_SEED = 1337
 BASE_TIME = datetime(2025, 1, 15, 9, 0, 0, tzinfo=timezone.utc)
 
+# The only domain allowed in synthetic identity data.
+SYNTHETIC_DOMAIN = "contoso.com"
+
 # Public contract: scenario -> synthetic UPN. Tests key off this.
 SCENARIO_UPNS: dict[str, str] = {
-    "impossible_travel": "alice.traveler@contoso.com",
-    "mfa_fatigue": "bob.fatigue@contoso.com",
-    "anonymous_ip": "carol.anon@contoso.com",
-    "app_consent": "dave.consent@contoso.com",
-    "privilege_escalation": "erin.admin@contoso.com",
+    "impossible_travel": f"alice.traveler@{SYNTHETIC_DOMAIN}",
+    "mfa_fatigue": f"bob.fatigue@{SYNTHETIC_DOMAIN}",
+    "anonymous_ip": f"carol.anon@{SYNTHETIC_DOMAIN}",
+    "app_consent": f"dave.consent@{SYNTHETIC_DOMAIN}",
+    "privilege_escalation": f"erin.admin@{SYNTHETIC_DOMAIN}",
 }
 
 # MITRE ATT&CK technique IDs mapped from the plan.
 SCENARIO_TECHNIQUES: dict[str, str] = {
-    "impossible_travel": "T1078",
-    "mfa_fatigue": "T1621",
-    "anonymous_ip": "T1090",
-    "app_consent": "T1550.001",
-    "privilege_escalation": "T1098",
+    "impossible_travel": "T1078",       # Valid Accounts
+    "mfa_fatigue": "T1621",             # MFA Request Generation
+    "anonymous_ip": "T1090.003",        # Proxy: Multi-hop Proxy
+    "app_consent": "T1528",             # Steal Application Access Token
+    "privilege_escalation": "T1098.003",  # Account Manipulation: Additional Cloud Roles
 }
 
 _NORMAL_LOCATIONS = [
@@ -107,13 +125,16 @@ def _signin(
     app: str | None = None,
     error_code: int = 0,
     failure_reason: str = "",
+    risk_detail: str = "none",
+    risk_level_aggregated: str = "none",
+    risk_level_during_sign_in: str = "none",
     risk_state: str = "none",
-    risk_level: str = "none",
     risk_event_types: list[str] | None = None,
     ca_status: str = "success",
     managed_device: bool = True,
     mfa_detail: dict | None = None,
 ) -> dict:
+    """Build one signIn resource using Microsoft Graph field names."""
     return {
         "id": _new_id(rng),
         "createdDateTime": _iso(created),
@@ -121,16 +142,18 @@ def _signin(
         "userPrincipalName": user["userPrincipalName"],
         "appDisplayName": app or rng.choice(_APPS),
         "ipAddress": ip,
-        "location": location,
-        "status": {"errorCode": error_code, "failureReason": failure_reason},
-        "riskState": risk_state,
-        "riskLevel": risk_level,
-        "riskEventTypes": risk_event_types or [],
-        "conditionalAccessStatus": ca_status,
-        "deviceDetail": _device(rng, managed=managed_device),
-        "mfaDetail": mfa_detail,
         "clientAppUsed": "Browser",
         "correlationId": _new_id(rng),
+        "conditionalAccessStatus": ca_status,
+        "riskDetail": risk_detail,
+        "riskLevelAggregated": risk_level_aggregated,
+        "riskLevelDuringSignIn": risk_level_during_sign_in,
+        "riskState": risk_state,
+        "riskEventTypes_v2": risk_event_types or [],
+        "status": {"errorCode": error_code, "failureReason": failure_reason},
+        "deviceDetail": _device(rng, managed=managed_device),
+        "mfaDetail": mfa_detail,
+        "location": location,
     }
 
 
@@ -185,7 +208,7 @@ def _generate_users(rng: random.Random, fake: Faker) -> list[dict]:
         users.append(_user_record(fake, rng, upn, local))
     for i in range(20):
         name = fake.name()
-        upn = f"user{i:02d}@contoso.com"
+        upn = f"user{i:02d}@{SYNTHETIC_DOMAIN}"
         users.append(_user_record(fake, rng, upn, name))
     return users
 
@@ -213,7 +236,7 @@ def _plant_scenario_signins(
 ) -> list[dict]:
     events: list[dict] = []
 
-    # 1. Impossible travel: New York -> Moscow within 25 minutes.
+    # 1. Impossible travel (T1078): New York -> Moscow within 25 minutes.
     alice = by_upn[SCENARIO_UPNS["impossible_travel"]]
     events.append(
         _signin(
@@ -223,8 +246,9 @@ def _plant_scenario_signins(
             location=_location("New York", "NY", "US", 40.7128, -74.0060),
             ip="203.0.113.10",
             risk_state="atRisk",
-            risk_level="high",
-            risk_event_types=["impossibleTravel"],
+            risk_level_aggregated="high",
+            risk_level_during_sign_in="high",
+            risk_event_types=["unlikelyTravel"],
         )
     )
     events.append(
@@ -235,13 +259,14 @@ def _plant_scenario_signins(
             location=_location("Moscow", "Moscow", "RU", 55.7558, 37.6173),
             ip="198.51.100.23",
             risk_state="atRisk",
-            risk_level="high",
-            risk_event_types=["impossibleTravel"],
+            risk_level_aggregated="high",
+            risk_level_during_sign_in="high",
+            risk_event_types=["unlikelyTravel"],
             ca_status="failure",
         )
     )
 
-    # 2. MFA fatigue: repeated denials, then a success.
+    # 2. MFA fatigue (T1621): repeated denials, then a success.
     bob = by_upn[SCENARIO_UPNS["mfa_fatigue"]]
     for offset in (0, 2, 4, 6):
         events.append(
@@ -254,8 +279,8 @@ def _plant_scenario_signins(
                 error_code=500121,
                 failure_reason="Authentication failed: MFA denied by user",
                 risk_state="atRisk",
-                risk_level="medium",
-                risk_event_types=["mfaDenied"],
+                risk_level_aggregated="medium",
+                risk_level_during_sign_in="medium",
                 ca_status="failure",
                 mfa_detail=_mfa("PhoneAppNotification", "Push notification denied"),
             )
@@ -268,13 +293,13 @@ def _plant_scenario_signins(
             location=_location("Seattle", "WA", "US", 47.6062, -122.3321),
             ip="192.0.2.55",
             risk_state="remediated",
-            risk_level="medium",
-            risk_event_types=["mfaDenied"],
+            risk_level_aggregated="medium",
+            risk_level_during_sign_in="medium",
             mfa_detail=_mfa("PhoneAppNotification", "Push notification approved"),
         )
     )
 
-    # 3. Anonymous IP / anonymizing proxy.
+    # 3. Anonymous IP / anonymizing proxy (T1090.003).
     carol = by_upn[SCENARIO_UPNS["anonymous_ip"]]
     events.append(
         _signin(
@@ -284,14 +309,15 @@ def _plant_scenario_signins(
             location=_location("Amsterdam", "North Holland", "NL", 52.3676, 4.9041),
             ip="185.220.101.9",
             risk_state="atRisk",
-            risk_level="high",
+            risk_level_aggregated="high",
+            risk_level_during_sign_in="high",
             risk_event_types=["anonymizedIPAddress"],
             ca_status="failure",
             managed_device=False,
         )
     )
 
-    # 4. Foreign/anomalous sign-in preceding app consent.
+    # 4. Foreign/anomalous sign-in preceding app consent (T1528).
     dave = by_upn[SCENARIO_UPNS["app_consent"]]
     events.append(
         _signin(
@@ -301,7 +327,8 @@ def _plant_scenario_signins(
             location=_location("Lagos", "Lagos", "NG", 6.5244, 3.3792),
             ip="102.89.34.77",
             risk_state="atRisk",
-            risk_level="high",
+            risk_level_aggregated="high",
+            risk_level_during_sign_in="high",
             risk_event_types=["unfamiliarFeatures"],
             ca_status="failure",
             managed_device=False,
@@ -315,7 +342,7 @@ def _plant_scenario_audits(
 ) -> list[dict]:
     audits: list[dict] = []
 
-    # 4. App consent granted shortly after the foreign sign-in.
+    # 4. App consent granted shortly after the foreign sign-in (T1528).
     dave = by_upn[SCENARIO_UPNS["app_consent"]]
     audits.append(
         _audit(
@@ -337,7 +364,7 @@ def _plant_scenario_audits(
         )
     )
 
-    # 5. Privilege escalation: added to Global Administrator.
+    # 5. Privilege escalation (T1098.003): added to Global Administrator.
     erin = by_upn[SCENARIO_UPNS["privilege_escalation"]]
     audit = _audit(
         rng,
@@ -361,7 +388,6 @@ def _plant_scenario_audits(
         result_reason="Member added to role Global Administrator.",
     )
     audits.append(audit)
-    # The escalation is only meaningful if the user is genuinely a target.
     assert erin["userPrincipalName"] in json.dumps(audit["targetResources"])
     return audits
 
@@ -425,9 +451,7 @@ def _generate_alerts(
     alerts: list[dict] = []
     for index, (scenario, upn) in enumerate(SCENARIO_UPNS.items(), start=1):
         candidates = [
-            e
-            for e in sign_ins
-            if e["userPrincipalName"] == upn and e["riskEventTypes"]
+            e for e in sign_ins if e["userPrincipalName"] == upn and e["riskEventTypes_v2"]
         ]
         source = candidates[0] if candidates else next(
             e for e in sign_ins if e["userPrincipalName"] == upn
@@ -440,9 +464,9 @@ def _generate_alerts(
                 "appDisplayName": source["appDisplayName"],
                 "ipAddress": source["ipAddress"],
                 "location": source["location"],
-                "riskLevel": source["riskLevel"],
+                "riskLevelAggregated": source["riskLevelAggregated"],
                 "riskState": source["riskState"],
-                "riskEventTypes": list(source["riskEventTypes"]),
+                "riskEventTypes_v2": list(source["riskEventTypes_v2"]),
                 "status": dict(source["status"]),
                 "scenario": scenario,
             }
@@ -481,7 +505,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict]]:
 def write_fixtures(
     out_dir: str | Path, seed: int = DEFAULT_SEED
 ) -> dict[str, Path]:
-    """Persist the dataset as JSONL fixture files. Returns the paths written."""
+    """Persist the dataset as JSONL. Same seed => byte-identical files."""
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     dataset = generate_dataset(seed=seed)
