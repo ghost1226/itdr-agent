@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 0 complete.
+Updated: Checkpoint 1 complete.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 1 — not started.**
+**Checkpoint 2 — not started.**
 
 ## What's Done
 
@@ -14,16 +14,22 @@ Updated: Checkpoint 0 complete.
   - Commit: `f186259`
   - All 7 skeleton tests pass.
   - pip-audit: **No known vulnerabilities found.**
+- ✅ Checkpoint 1: Synthetic Entra ID data generator with 5 planted MITRE ATT&CK patterns.
+  - Commit: `cf443c5`
+  - 15 new tests in `tests/test_data_generator.py`; full suite 22 passed.
+  - Fixtures committed: `data/fixtures/users.jsonl` (25), `sign_ins.jsonl` (109),
+    `directory_audits.jsonl` (52), `alerts.jsonl` (5).
+  - Generation is deterministic given a seed (`generate_dataset(seed=1337)`).
+  - pip-audit: **No known vulnerabilities found.**
 
 ## What's Next
 
-1. Research Microsoft sign-in + directory audit log schemas.
-2. Write failing tests for synthetic data generator.
-3. Build `itdr_agent/data_generator.py` with Faker.
-4. Plant 5 MITRE ATT&CK attack patterns in synthetic data.
-5. Generate and commit fixture files to `data/fixtures/`.
-6. Make tests pass.
-7. Commit.
+Checkpoint 2 — Pydantic schemas + structured I/O contracts:
+1. Write failing `tests/test_schemas.py`.
+2. Define `InvestigatorOutput` (evidence dossier) with `is_critical_gap` rule.
+3. Define `AdjudicatorOutput` (incident report) with `verdict` enum and containment/rollback.
+4. Implement confidence coercion in code (<0.7 and verdict != INSUFFICIENT_DATA → INSUFFICIENT_DATA + audit note).
+5. Make tests pass and commit.
 
 ## Decisions Made
 
@@ -42,6 +48,10 @@ Updated: Checkpoint 0 complete.
 | Lightweight deps | Dropped `presidio-analyzer` (pulls spaCy + large model) and `python-docx` (unused). Synthetic domain regex check is sufficient for anonymization. |
 | Fixtures: commit or generate | `data/fixtures/` is not gitignored. Small fake JSONL files will be committed. Tests also support generating from seed for a fresh start. |
 | `get_risky_user_report` | Dropped from Investigator tool registry. The agent already infers risk from sign-in history and directory audits. Keeps tool count lean. |
+| Deterministic IDs via seeded RNG, not Faker | `uuid.UUID(int=rng.getrandbits(128))` keeps IDs stable across code changes that alter Faker call order. |
+| Alerts fixture included in Checkpoint 1 | The architecture and CLI need alert IDs; generating them alongside sign-ins keeps the simulator self-contained. |
+| Scenario UPNs exposed as `SCENARIO_UPNS` | Tests and later tools need a stable way to locate the 5 planted attack patterns. |
+| `impossibleTravel`/`anonymizedIPAddress`/`unfamiliarFeatures` in `riskEventTypes` | Matches real Graph `signInLogs` risk event taxonomy, so downstream detection stays realistic. |
 
 ## Open Problems
 
@@ -51,3 +61,5 @@ Updated: Checkpoint 0 complete.
 ## Commit History
 
 - `f186259` — checkpoint-0: skeleton, venv, pinned deps, pip-audit clean, red-green TDD
+- `5528d5e` — checkpoint-0: update PROGRESS.md
+- `cf443c5` — checkpoint-1: synthetic data generator with 5 MITRE ATT&CK patterns
