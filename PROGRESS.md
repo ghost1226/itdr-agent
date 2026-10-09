@@ -1,6 +1,6 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 2 complete.
+Updated: Checkpoint 1 revised to review notes; Checkpoint 2 complete.
 
 ---
 
@@ -11,32 +11,66 @@ Updated: Checkpoint 2 complete.
 ## What's Done
 
 - ✅ Checkpoint 0: Project skeleton, venv, pinned dependencies, pip-audit clean, red-green TDD.
-  - Commit: `f186259`
+  - Commit: `f186259` (diary `5528d5e`).
   - All 7 skeleton tests pass.
-  - pip-audit: **No known vulnerabilities found.**
-- ✅ Checkpoint 1: Synthetic Entra ID data generator with 5 planted MITRE ATT&CK patterns.
-  - Commit: `cf443c5`
-  - 15 new tests in `tests/test_data_generator.py`; full suite 22 passed.
-  - Fixtures committed: `data/fixtures/users.jsonl` (25), `sign_ins.jsonl` (109),
-    `directory_audits.jsonl` (52), `alerts.jsonl` (5).
-  - Generation is deterministic given a seed (`generate_dataset(seed=1337)`).
-  - pip-audit: **No known vulnerabilities found.**
+- ✅ Checkpoint 0 fixes (review feedback):
+  - Commit: `19ec859`.
+  - **A.** Bumped `openai` from `1.63.2` → `3.26.1` (current stable on PyPI). Re-ran `pip-audit`: **No known vulnerabilities found.**
+  - **C.** `test_timeout_default` now clears `TIMEOUT_SECONDS`/`ITDR_TIMEOUT` with `monkeypatch.delenv` and neutralises `dotenv.load_dotenv`, so a developer's real `.env` cannot break it. Verified with a hostile `.env` (`TIMEOUT_SECONDS=999`): both timeout tests pass.
+  - **B.** Red-green commits adopted from here on (see Checkpoint 1 below).
 - ✅ Checkpoint 2: Pydantic schemas + structured I/O contracts.
-  - Commit: `d445d00`
-  - 17 new tests in `tests/test_schemas.py`; full suite 39 passed.
-  - `InvestigatorOutput` enforces `is_critical_gap` from data (profile missing OR empty sign-in history), never from the caller.
-  - `AdjudicatorOutput` validates `Verdict` enum, confidence 0–1, and rollback on every containment step.
-  - `apply_confidence_guardrail` is a plain function (not a validator): <0.70 and verdict != INSUFFICIENT_DATA → coerced verdict + audit note, confidence left honest.
+  - Commit: `d445d00` (diary `703d310`).
+  - 17 tests in `tests/test_schemas.py`; `InvestigatorOutput` enforces `is_critical_gap` from data; `AdjudicatorOutput` validates verdict/confidence/rollback; `apply_confidence_guardrail` lives in code, not a validator.
+- ✅ Checkpoint 1: Synthetic Entra ID data generator (revised per review).
+  - **Red:** `9f2d832` — tests only; `pytest tests/test_data_generator.py` → **7 failed, 12 passed**.
+  - **Green:** `188a293` — implementation + fixtures; **19 passed**, full suite **43 passed**.
+  - Fixtures committed: `users.jsonl` (25), `sign_ins.jsonl` (109), `directory_audits.jsonl` (52), `alerts.jsonl` (5).
+  - Same seed ⇒ byte-identical files (verified by SHA-256 across two runs).
+  - Every user/email uses `@contoso.com`; test rejects common leaked domains.
+
+## Microsoft Graph Schema Sources
+
+Field names in `itdr_agent/data_generator.py` follow these published shapes:
+
+| Resource | Fields used | Source |
+|----------|-------------|--------|
+| `signIn` (v1.0) | `riskEventTypes_v2`, `riskDetail`, `riskLevelAggregated`, `riskLevelDuringSignIn`, `riskState`, `status`, `deviceDetail`, `location`, `clientAppUsed`, `conditionalAccessStatus`, `correlationId` | https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0 |
+| `mfaDetail` (beta) | `authMethod`, `authDetail` | https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta |
+| `directoryAudit` (v1.0) | `activityDateTime`, `activityDisplayName`, `category`, `correlationId`, `initiatedBy`, `targetResources`, `result`, `resultReason`, `loggedByService` | https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0 |
+
+Notes verified against the live docs page:
+- `riskEventTypes` is **deprecated**; we emit `riskEventTypes_v2`.
+- Valid `riskEventTypes_v2` values include `unlikelyTravel`, `anonymizedIPAddress`, `unfamiliarFeatures`.
+- Anonymous IP is therefore `riskEventTypes_v2 == ["anonymizedIPAddress"]`, **not** a `riskEventType` scalar.
+
+## MITRE ATT&CK Checklist
+
+| Planted attack | Technique | Evidence in data | Test |
+|----------------|-----------|------------------|------|
+| Impossible travel | **T1078** | two `unlikelyTravel` sign-ins (US → RU) 25 min apart | `test_impossible_travel_pattern` |
+| MFA fatigue | **T1621** | ≥3 MFA-denied sign-ins followed by a success | `test_mfa_fatigue_pattern` |
+| Anonymous IP | **T1090.003** | `riskEventTypes_v2` contains `anonymizedIPAddress`, high risk | `test_anonymous_ip_pattern` |
+| App consent after foreign sign-in | **T1528** | `unfamiliarFeatures` sign-in → `Consent to application` audit | `test_app_consent_after_foreign_signin_pattern` |
+| Privilege escalation | **T1098.003** | `Add member to role` → Global Administrator audit | `test_privilege_escalation_pattern` |
+
+Each pattern test finds the behaviour in the generated data **and** asserts
+`SCENARIO_TECHNIQUES[scenario]` equals the expected technique ID.
+
+## Fixture Decision
+
+**Commit the fixtures.** They are fake, small, and deterministic, so they are
+tracked in git under `data/fixtures/` (not gitignored). Tests may also
+regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=...)`.
 
 ## What's Next
 
 Checkpoint 3 — MS Graph simulation layer:
-1. Write failing `tests/test_sim_api.py`.
+1. Write failing `tests/test_sim_api.py` (red commit first).
 2. Build `itdr_agent/fixture_store.py` to load/query committed JSONL fixtures.
 3. Build `itdr_agent/sim_api.py` exposing the five Graph-shaped endpoints.
 4. Support deterministic error injection (`injected_error` param) for 429/500.
 5. Unknown IDs return `None`/empty lists, never raise.
-6. Make tests pass and commit.
+6. Green commit, then commit PROGRESS.md.
 
 ## Decisions Made
 
@@ -53,15 +87,18 @@ Checkpoint 3 — MS Graph simulation layer:
 | Timeout default 120s | Free models are slow. Configurable via `.env`. |
 | Commit inside existing repo | `~/ai-agents-class` is already a git repo with a private GitHub remote. |
 | Lightweight deps | Dropped `presidio-analyzer` (pulls spaCy + large model) and `python-docx` (unused). Synthetic domain regex check is sufficient for anonymization. |
-| Fixtures: commit or generate | `data/fixtures/` is not gitignored. Small fake JSONL files will be committed. Tests also support generating from seed for a fresh start. |
+| Fixtures: commit them | Fake, small, deterministic JSONL. Tests can also regenerate from seed. |
 | `get_risky_user_report` | Dropped from Investigator tool registry. The agent already infers risk from sign-in history and directory audits. Keeps tool count lean. |
+| `riskEventTypes_v2`, not the deprecated `riskEventTypes` | Matches current Graph; anonymous IP surfaces here as `anonymizedIPAddress`. |
+| Impossible travel value is `unlikelyTravel` | That is the real `riskEventTypes_v2` value; "impossibleTravel" does not exist in the enum. |
+| MITRE IDs corrected | anonymous IP `T1090.003`, app consent `T1528`, privilege escalation `T1098.003` (review feedback). |
 | Deterministic IDs via seeded RNG, not Faker | `uuid.UUID(int=rng.getrandbits(128))` keeps IDs stable across code changes that alter Faker call order. |
 | Alerts fixture included in Checkpoint 1 | The architecture and CLI need alert IDs; generating them alongside sign-ins keeps the simulator self-contained. |
 | Scenario UPNs exposed as `SCENARIO_UPNS` | Tests and later tools need a stable way to locate the 5 planted attack patterns. |
-| `impossibleTravel`/`anonymizedIPAddress`/`unfamiliarFeatures` in `riskEventTypes` | Matches real Graph `signInLogs` risk event taxonomy, so downstream detection stays realistic. |
-| `is_critical_gap` enforced by a model validator | Callers (including the LLM-backed Investigator) cannot claim no critical gap when profile or sign-in history is missing. |
+| `is_critical_gap` enforced by a model validator | Callers cannot claim no critical gap when profile or sign-in history is missing. |
 | Confidence guardrail as a plain function | Pydantic validators run on construction and would block honest low-confidence reports. The orchestrator applies policy explicitly. |
 | `Verdict` as `str, Enum` | Serializes cleanly to JSON and compares naturally with plain strings in tests. |
+| Red-green commits from Checkpoint 1 onward | Review requirement: failing tests are committed first (`checkpoint-1: red`), then the code (`checkpoint-1: green`). |
 
 ## Open Problems
 
@@ -75,3 +112,7 @@ Checkpoint 3 — MS Graph simulation layer:
 - `cf443c5` — checkpoint-1: synthetic data generator with 5 MITRE ATT&CK patterns
 - `495f9eb` — checkpoint-1: update PROGRESS.md
 - `d445d00` — checkpoint-2: pydantic schemas, critical-gap rule, confidence guardrail
+- `703d310` — checkpoint-2: update PROGRESS.md
+- `19ec859` — checkpoint-0-fix: bump openai to 3.26.1, harden timeout test against real .env
+- `9f2d832` — checkpoint-1: red — real Graph field names, corrected MITRE IDs, byte-stable and synthetic-domain tests
+- `188a293` — checkpoint-1: green — Graph-accurate fields, corrected MITRE IDs, byte-identical fixtures
