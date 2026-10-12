@@ -24,6 +24,16 @@ class Verdict(str, Enum):
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 
 
+class AnalystAnswer(BaseModel):
+    """A single analyst answer to one targeted question."""
+
+    question: str
+    status: str
+    answer: str
+    choice_index: int | None = None
+    free_text: bool = False
+
+
 class InvestigatorOutput(BaseModel):
     """Evidence dossier assembled by the Investigator agent."""
 
@@ -36,6 +46,7 @@ class InvestigatorOutput(BaseModel):
     risk_indicators: list[str] = Field(default_factory=list)
     mitre_attack_mapping: list[str] = Field(default_factory=list)
     mitre_attack_evidence: dict[str, list[str]] = Field(default_factory=dict)
+    analyst_context: list[AnalystAnswer] = Field(default_factory=list)
     data_gaps: list[str] = Field(default_factory=list)
     is_critical_gap: bool = False
 

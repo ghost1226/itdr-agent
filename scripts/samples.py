@@ -99,15 +99,21 @@ def _tool_script(upn: str, device_id: str) -> list[dict]:
     ]
 
 
-def build_dossier(alert_id: str) -> tuple[Any, dict]:
-    """Build a real dossier for an alert using scripted (offline) LLMs."""
+def build_investigator(alert_id: str):
+    """Return (investigator with scripted offline tools, alert)."""
     store = get_store()
     alert = next(a for a in store.alerts if a["id"] == alert_id)
     upn = alert["userPrincipalName"]
     events = store.sign_in_history(upn, 10_000)
     device_id = events[0]["deviceDetail"]["deviceId"] if events else ""
     llm = _ScriptedToolLLM(_tool_script(upn, device_id))
-    return Investigator(llm).investigate(alert), alert
+    return Investigator(llm), alert
+
+
+def build_dossier(alert_id: str) -> tuple[Any, dict]:
+    """Build a real dossier for an alert using scripted (offline) LLMs."""
+    investigator, alert = build_investigator(alert_id)
+    return investigator.investigate(alert), alert
 
 
 def _hours_between(start: str, end: str) -> float:

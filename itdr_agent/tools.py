@@ -56,3 +56,17 @@ def wrap_tool_output(name: str, payload: Any) -> str:
         f"{body}\n"
         f"</microsoft_graph_data>"
     )
+
+
+def wrap_analyst_input(answer: str) -> str:
+    """Wrap an ``ask_user`` answer as untrusted data.
+
+    The analyst is trusted, but the answer may contain pasted log text, so
+    ``<``/``>`` are escaped and the answer is delimited in its own block.
+    """
+    escaped = answer.replace("<", "\\u003c").replace(">", "\\u003e")
+    return (
+        f'<analyst_input untrusted="true">\n'
+        f"{escaped}\n"
+        f"</analyst_input>"
+    )

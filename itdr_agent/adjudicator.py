@@ -23,7 +23,7 @@ from .schemas import (
     InvestigatorOutput,
     apply_confidence_guardrail,
 )
-from .tools import wrap_tool_output
+from .tools import wrap_analyst_input, wrap_tool_output
 
 # Verified free on OpenRouter (see PROGRESS.md); override with EVAL_MODEL.
 DEFAULT_MODEL = "google/gemma-4-31b-it:free"
@@ -68,15 +68,25 @@ def build_adjudicator_prompt(
     dossier: InvestigatorOutput,
 ) -> list[dict[str, Any]]:
     """Build the single-shot messages; the dossier is untrusted, wrapped data."""
-    return [
+    payload = dossier.model_dump(mode="json")
+    analyst_context = payload.pop("analyst_context", [])
+    messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": wrap_tool_output(
-                "dossier", dossier.model_dump(mode="json")
-            ),
+            "content": wrap_tool_output("dossier", payload),
         },
     ]
+    # Analyst answers are trusted people, but may hold pasted log text; wrap
+    # each one in its own <analyst_input> block, never inside the dossier.
+    for answer in analyst_context:
+        messages.append(
+            {
+                "role": "user",
+                "content": wrap_analyst_input(str(answer.get("answer", ""))),
+            }
+        )
+    return messages
 
 
 def _strip_code_fences(raw: str) -> str:
