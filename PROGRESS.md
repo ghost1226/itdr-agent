@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 6 passed review. Next: Checkpoint 7 (evaluation) tomorrow — blocked on Joe's OpenRouter key in `.env` and his credits decision.
+Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's go for the live evaluation, starting with a 1-run smoke test.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 6 — passed review. Next: Checkpoint 7 — Evaluation harness; blocked until Joe puts his OpenRouter key in `.env` and decides on credits.**
+**Checkpoint 7 — harness built and tested offline (197 tests). The live evaluation has NOT been run. Waiting for Joe's go.**
 
 ## What's Done
 
@@ -97,6 +97,16 @@ Updated: Checkpoint 6 passed review. Next: Checkpoint 7 (evaluation) tomorrow �
   - Analyst answers are wrapped in `<analyst_input untrusted="true">` (escaped), never inside the dossier block; the dossier gains `InvestigatorOutput.analyst_context`.
   - `python -m itdr_agent --alert-id ALERT_001` (live) and `python scripts/demo_orchestrator.py` (offline, no tokens).
   - **Review: passed (Jessica).** She ran the offline demo in a clean copy; the approve/edit/reject audit lines, the analyst-input breakout probe, and the ALERT_010 short-circuit all check out.
+- ✅ Checkpoint 7 fix 1 (Pi): `run_id` on every audit line (`run`, `containment_decision`, `ask_user`, `re_adjudication`, `mitre_rejection`).
+  - One commit `70217a0` (tests + code together, no separate red). Red verified afterwards: the new tests run against `0bd0f18` code → **3 failed, 6 passed**; at `70217a0` they pass.
+- ✅ Checkpoint 7: evaluation harness (built by Jessica; Pi's run stopped when its own OpenRouter key hit its spending cap, 2026-10-12). Pi's uncommitted draft was replaced; see Mistakes & Lessons for its gaps.
+  - **Red:** `7e847f4` — tests + a stub `evaluate.py`; `pytest tests/test_evaluate.py` → **29 failed**, rest of suite 167 passed.
+  - **Green:** `22dd74d` — **30 passed** (one live-wiring test added in green; proven by mutation: switching off request counting in `_chat` makes it fail). Full suite **197 passed**; pip-audit: **No known vulnerabilities found**.
+  - `scripts/evaluate.py --live` runs every alert through the **real orchestrator** (`EVAL_MODEL`, default `google/gemma-4-31b-it:free`); `--dry-run` uses offline stand-ins (no key, no network) and writes only `eval/dry_run/`. No flag → refuses (exit 2).
+  - **Budget:** `RequestBudget` counts every request before it is sent (failed runs count), spaces requests 3.1 s apart (≤ 20 in any 60 s), and a run starts only if its worst case (`MAX_REQUESTS_PER_RUN = 10`: 8 tool turns + the cap/final turn + 1 Adjudicator) still fits under the daily budget (default 45 < free cap 50). OpenAI SDK retries are off (`max_retries=0`).
+  - **Resume:** `eval/raw.jsonl` (one line per finished run) is the resume point; `eval/state.json` holds the UTC day + requests used. A 429, the budget, or a 401/402/403 stops the session and leaves that run pending (`eval/interruptions.jsonl`); it is retried next session. MITRE rejection, invalid JSON, timeouts, other API errors → a failed run record, never a crash.
+  - **Metrics:** exact verdict accuracy (failed runs count as wrong; also shown over scored runs), majority-of-3, attack-vs-benign detection over the 8 labeled attack/benign alerts, false positives, MITRE precision/recall (n/a when nothing predicted), multi-run agreement (errors are an outcome), tokens/seconds/requests totals and means, per-alert and per-run tables, failure table (wrong verdict with the model's own notes; missing technique says Investigator vs Adjudicator; unexpected technique; errors), interrupted attempts, caveats.
+  - **Dry run:** 30 runs, 207 requests (6–7 per run with the offline tool script) → **about 5 days at 45/day; worst case 8**.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -172,17 +182,13 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 **Checkpoint 1b — complete ...; 106 tests). Checkpoint 4 task 8 — complete (`377d586`/`5dd360d`; 112 tests). Checkpoint 5 — complete (`a2ed3f5`/`cdac646`, then `2e6a950`/`221a907`, `01212d6`/`c6d7132`, `45ebedd`/`8e8912c`; 153 tests). Checkpoint 6 — complete (`efe5d05`/`b6d266d`; 165 tests).**
 
-**Next: Checkpoint 7 — Evaluation harness. BLOCKED until Joe puts his OpenRouter key in `.env` and decides on credits. Do not run the live key until then.**
+**Next: the live evaluation — only on Joe's go.** Joe's key is in `.env` (free tier, 50 requests/day; Joe chose to stay free, 2026-10-12).
+1. Smoke test first: `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
+2. Then `python scripts/evaluate.py --live` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
+3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
+4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README.
 
-Apply these first in Checkpoint 7:
-1. **`run_id` on every audit line** (including `run`, `containment_decision`, `ask_user`, `re_adjudication`, `mitre_rejection`), so the 3 runs per alert in the evaluation can be told apart.
-2. **Failure rows, never crashes:** in `scripts/evaluate.py`, a MITRE rejection, a parse error, a timeout, or a 429 must become a failure-table row for that run (alert, what went wrong, why) — not an exception that aborts the evaluation.
-
-Then:
-1. `scripts/evaluate.py`: all 10 alerts × 3 runs through the real orchestrator/model (`EVAL_MODEL`, default `google/gemma-4-31b-it:free`).
-2. Metrics: verdict accuracy (primary), attack-vs-benign detection (secondary), false positives, MITRE precision, multi-run agreement, tokens/seconds per run, failure table.
-3. Save `eval/results.md` + `eval/raw.jsonl`; offline `tests/test_evaluate.py` with a fake runner.
-4. **Do not run with the live key until Joe says go.**
+Open: the orchestrator's `timeout_seconds` (Checkpoint 6, PLAN: total timeout 120 s) is stored but never enforced; only the per-request client timeout (90 s) applies. Raise with Joe before fixing.
 
 ## Mistakes & Lessons
 
@@ -201,6 +207,8 @@ mistake made in this project, its root cause, and the rule that prevents it.
 | Started Checkpoint 2 before Checkpoint 1 fixes | Advanced without waiting for review | AGENTS.md rule 9: stop after each checkpoint, show evidence, wait | AGENTS.md rule 9 |
 | Mapped `T1098.003` from role adds the user merely initiated, with no time window | `_derive` treated any role add the user touched as escalation | Check direction (user must be the target) and confine to the investigation window; tie each technique to evidence ids | `541047f` / `2d9a680` |
 | Tool-data wrapper could be broken out of with `</microsoft_graph_data>` | `json.dumps` leaves `<`/`>` unescaped | Escape `<`/`>` to `\u003c`/`\u003e` so the closing tag appears exactly once | `541047f` / `2d9a680` |
+| Pi's Checkpoint 7 draft: live mode was a placeholder; failed runs were never written to raw output; a run could start with only 1 request of budget left and overshoot the cap; previous days' results were dropped on resume; a 429 marked the run as done; the request estimate was a hard-coded 6 | Draft written before the tests, and the tests never ran | Write the tests first and include the live path (fake client); count requests where they are sent; reserve the worst case before a run starts; resume from the raw file, not memory | `7e847f4` / `22dd74d` |
+| Checkpoint 7 fix 1 landed without a separate red commit | Tests and code committed together | Red-green holds for fixes too; red verified after the fact against the parent commit | `70217a0` |
 | Emitted `riskEventTypes_v2` on a `riskyUser` record | Copied a `signIn` field onto the `riskyUser` shape | Use the graph-field-check allowlist per resource; a field on one Graph resource is not valid on another | `3e70589` |
 
 Standing prevention rules distilled from the above:
@@ -257,6 +265,13 @@ Standing prevention rules distilled from the above:
 | graph-field-check allowlist test per resource | Catches invented/renamed fields; it caught `riskyUser.riskEventTypes_v2`. |
 | `user_context.jsonl` (home city, known devices, stable IPs) | Realistic baseline noise; lets tests prove benign cases are physically plausible without putting project fields in Graph records. |
 | `benign_vpn` uses beta `networkLocationDetails` | The agent cannot know `198.51.100.x` is the company VPN from the IP alone; a trusted named network is the Graph-native explanation. |
+| Evaluation needs `--live` explicitly | A bare `python scripts/evaluate.py` must never spend the free daily requests by accident. |
+| Budget reserves the worst case before each run | A run cut off mid-way wastes its requests; starting only with 10 requests of room keeps a session at or under 45 (free cap 50). |
+| UTC day for the request counter | Assumed to match the free tier's daily window; a 429 stops the session anyway, so a mismatch costs a retry, not an overrun. |
+| SDK retries off (`max_retries=0`) | The OpenAI SDK retries twice by default, which would spend extra requests unseen. |
+| 429 / budget / auth stops leave the run pending | A rate limit says nothing about the model, so it is not scored; the run is redone next session and the stop is logged in `interruptions.jsonl`. |
+| Failed runs count as wrong in the headline accuracy | Otherwise a model that crashes on hard alerts would look more accurate. The accuracy over scored runs is shown beside it. |
+| Detection accuracy excludes the 2 INSUFFICIENT_DATA alerts | They are neither attack nor benign; exact accuracy already scores them. |
 | Alert is allowlisted + wrapped like tool output | The full alert record (including `scenario`) must never reach the model; `build_alert_prompt` applies `ALERT_FIELD_ALLOWLIST` and the untrusted-data wrapper. |
 
 ## Free OpenRouter Model (Checkpoint 5)
@@ -327,3 +342,6 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 - `8e8912c` — checkpoint-5-fix3: green — expected only for ticket-backed FALSE_POSITIVE, benign containment steps empty
 - `efe5d05` — checkpoint-6: red — orchestrator, HITL approve/edit/reject, one ask/re-adjudication, MITRE guard, short-circuit, anonymization
 - `b6d266d` — checkpoint-6: green — orchestrator, governance, HITL ask/review, MITRE guard wiring, CLI + offline demo
+- `70217a0` — checkpoint-7-fix1: add run_id to every audit line in orchestrator
+- `7e847f4` — checkpoint-7: red — evaluation harness tests (budget, resume, failure rows, metrics, dry run)
+- `22dd74d` — checkpoint-7: green — evaluation harness: real orchestrator runs, request budget + pacing, resume, failure rows, metrics, dry run
