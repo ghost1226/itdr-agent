@@ -52,7 +52,9 @@ def test_alert006_travel_narrative_uses_its_own_evidence():
     assert report.verdict is Verdict.FALSE_POSITIVE
     text = report.narrative.lower()
     assert "device" in text
-    assert "hour" in text or "flight" in text
+    assert "new york" in text and "london" in text
+    assert "hours apart" in text
+    assert "8.2 hours apart" in text  # the real NY->London leg, not a baseline
     assert "ticket" not in text and "helpdesk" not in text
     assert "disable" not in report.model_dump_json().lower()
 
