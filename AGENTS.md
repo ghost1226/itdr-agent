@@ -10,7 +10,7 @@ These rules stand for the life of the project. Read this and PROGRESS.md at the 
 2. **Virtual environment inside the project folder.** Nothing installed globally.
 3. **API keys only in `.env`.** `.env` is gitignored. Never hardcode a key.
 4. **Red-green TDD.** Write the failing test first, then make it pass.
-5. **Commit after every task** inside the existing `~/ai-agents-class` repo. Do **not** run `git init`.
+5. **Commit after every task** inside this repo, `~/itdr-agent` (private GitHub remote `ghost1226/itdr-agent`). Do **not** run `git init`. The old copy at `~/ai-agents-class/itdr-agent` is frozen; never work there.
 6. **Ask before running any command outside the project folder.**
 7. **Ask me only about scope, design, or missing facts.** Decide implementation details yourself.
 8. **At the end of every task, update PROGRESS.md** (done, next, decisions, problems, commit hash) and commit it.

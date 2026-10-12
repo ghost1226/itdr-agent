@@ -44,7 +44,7 @@ The added work is checkpoints **1b**, **6 (HITL tasks)**, **7**, and the
 ---
 
 ## Git Context
-`~/ai-agents-class` is already a git repository with a private GitHub remote. Do **not** run `git init`. All commits are made inside this existing repo.
+**Since 2026-10-12** the project lives in its own repo: `~/itdr-agent`, private GitHub remote `ghost1226/itdr-agent` (made from the `itdr-agent/` folder of `~/ai-agents-class` with its full history, so Joe's partner and reviewers can get just this project). Do **not** run `git init`. All commits are made in `~/itdr-agent`. The old copy at `~/ai-agents-class/itdr-agent` is frozen. Checkpoint 0's paths below are the original ones.
 
 ---
 

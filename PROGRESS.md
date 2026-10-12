@@ -1,5 +1,7 @@
 # Progress Diary — ITDR Identity Incident Builder
 
+**Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
+
 Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's go for the live evaluation, starting with a 1-run smoke test.
 
 ---
@@ -236,7 +238,8 @@ Standing prevention rules distilled from the above:
 | Deterministic errors via injection | No flaky tests. Tests pass explicit `injected_error` parameters. |
 | Integration tests separate from unit tests | Unit tests mock the LLM. Real-model runs are manual scripts, not CI. |
 | Timeout default 120s | Free models are slow. Configurable via `.env`. |
-| Commit inside existing repo | `~/ai-agents-class` is already a git repo with a private GitHub remote. |
+| Commit inside existing repo | `~/ai-agents-class` is already a git repo with a private GitHub remote. (Superseded 2026-10-12, see below.) |
+| Own repo: `~/itdr-agent` → private `ghost1226/itdr-agent` (2026-10-12) | Joe's partner runs half the evaluation and a review group will read the code; they get just this project. Full history kept (red/green commits are evidence). The old `~/ai-agents-class/itdr-agent` copy is frozen so the two never drift. |
 | Lightweight deps | Dropped `presidio-analyzer` (pulls spaCy + large model) and `python-docx` (unused). Synthetic domain regex check is sufficient for anonymization. |
 | Fixtures: commit them | Fake, small, deterministic JSONL. Tests can also regenerate from seed. |
 | `get_risky_user_report` | Dropped from Investigator tool registry. The agent already infers risk from sign-in history and directory audits. Keeps tool count lean. |
