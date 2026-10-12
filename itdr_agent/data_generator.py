@@ -72,8 +72,18 @@ UNKNOWN_SCENARIO = "unknown"
 UNKNOWN_ALERT_UPN: str = f"ghost.user@{SYNTHETIC_DOMAIN}"
 
 # Company VPN egress IPs (RFC 5737 documentation range). Sign-ins from these
-# addresses are expected and must not be treated as anonymizing.
+# addresses are expected and must not be treated as anonymizing. The beta
+# signIn field networkLocationDetails marks the trusted named network.
 KNOWN_VPN_EGRESS_IPS: list[str] = ["198.51.100.10", "198.51.100.11"]
+VPN_NETWORK_NAME = "Contoso Corporate VPN"
+
+# Home cities for the benign scenarios, so planted movement is physically
+# plausible (New York -> London is a real 8h flight, not 15 minutes).
+SCENARIO_HOME_CITIES: dict[str, str] = {
+    "benign_travel": "New York",
+    "benign_admin_role": "New York",
+    "benign_vpn": "Seattle",
+}
 
 # Alerts are Graph-shaped only. Ground truth (scenario, expected verdict,
 # expected MITRE, is_benign) lives in data/fixtures/ground_truth.jsonl and is
@@ -196,6 +206,7 @@ def _signin(
     ca_status: str = "success",
     managed_device: bool = True,
     device: dict | None = None,
+    network_location_details: list[dict] | None = None,
     mfa_detail: dict | None = None,
 ) -> dict:
     """Build one signIn resource using Microsoft Graph field names."""
@@ -221,6 +232,7 @@ def _signin(
             else _device(rng, managed=managed_device)
         ),
         "mfaDetail": mfa_detail,
+        "networkLocationDetails": network_location_details or [],
         "location": location,
     }
 
@@ -292,29 +304,70 @@ def _generate_users(rng: random.Random, fake: Faker) -> list[dict]:
     return users
 
 
-def _baseline_signins(rng: random.Random, users: list[dict]) -> list[dict]:
+def _build_user_context(rng: random.Random, users: list[dict]) -> list[dict]:
+    """Assign each user a home city, 1-2 stable devices, and a small IP set.
+
+    These are project-side metadata (not Graph fields), used to keep baseline
+    noise realistic: background sign-ins always come from the same home city,
+    a known device, and a stable IP.
+    """
+    context: list[dict] = []
+    for user in users:
+        upn = user["userPrincipalName"]
+        forced_city = None
+        for scenario, city in SCENARIO_HOME_CITIES.items():
+            if SCENARIO_UPNS[scenario] == upn:
+                forced_city = city
+                break
+        if forced_city is not None:
+            home = next(
+                loc for loc in _NORMAL_LOCATIONS if loc[0] == forced_city
+            )
+        else:
+            home = rng.choice(_NORMAL_LOCATIONS)
+        context.append(
+            {
+                "userPrincipalName": upn,
+                "homeLocation": _location(*home),
+                "devices": [
+                    _device(rng, managed=True)
+                    for _ in range(rng.randint(1, 2))
+                ],
+                "ipAddresses": [
+                    _random_ip(rng) for _ in range(rng.randint(2, 3))
+                ],
+            }
+        )
+    return context
+
+
+def _baseline_signins(
+    rng: random.Random, users: list[dict], context_by_upn: dict[str, dict]
+) -> list[dict]:
     events: list[dict] = []
     for user in users:
-        if user["userPrincipalName"] == THIN_DATA_UPN:
+        upn = user["userPrincipalName"]
+        if upn == THIN_DATA_UPN:
             # Thin-data user gets an intentionally tiny, dedicated history.
             continue
+        ctx = context_by_upn[upn]
         for _ in range(4):
             created = BASE_TIME - timedelta(hours=rng.randint(1, 72))
-            loc = _location(*rng.choice(_NORMAL_LOCATIONS))
             events.append(
                 _signin(
                     rng,
                     user=user,
                     created=created,
-                    location=loc,
-                    ip=_random_ip(rng),
+                    location=ctx["homeLocation"],
+                    device=rng.choice(ctx["devices"]),
+                    ip=rng.choice(ctx["ipAddresses"]),
                 )
             )
     return events
 
 
 def _plant_scenario_signins(
-    rng: random.Random, by_upn: dict[str, dict]
+    rng: random.Random, by_upn: dict[str, dict], context_by_upn: dict[str, dict]
 ) -> tuple[list[dict], dict[str, dict]]:
     events: list[dict] = []
     evidence: dict[str, dict] = {}
@@ -452,10 +505,10 @@ def _plant_scenario_signins(
         ),
     )
 
-    # --- Benign (false-positive) scenarios --------------------------------
     # Real travel: same known, compliant device, no risk events afterwards.
+    # New York -> London is a real ~8h flight, so the speed is plane-plausible.
     frank = by_upn[SCENARIO_UPNS["benign_travel"]]
-    travel_device = _device(rng, managed=True)
+    travel_device = context_by_upn[frank["userPrincipalName"]]["devices"][0]
     add(
         "benign_travel",
         _signin(
@@ -473,16 +526,19 @@ def _plant_scenario_signins(
         _signin(
             rng,
             user=frank,
-            created=BASE_TIME + timedelta(minutes=20),
+            created=BASE_TIME + timedelta(hours=8, minutes=20),
             location=_location("London", "England", "GB", 51.5074, -0.1278),
             ip="203.0.113.51",
             device=travel_device,
         ),
     )
 
-    # Expected admin role add: a dedicated sign-in so the alert fires on the
-    # target and the in-window role add is visible.
+    # Expected admin role add: a dedicated sign-in on a known device so the
+    # alert fires on the target and the in-window role add is visible.
     admin_target = by_upn[SCENARIO_UPNS["benign_admin_role"]]
+    admin_device = context_by_upn[admin_target["userPrincipalName"]][
+        "devices"
+    ][0]
     add(
         "benign_admin_role",
         _signin(
@@ -491,19 +547,27 @@ def _plant_scenario_signins(
             created=BASE_TIME + timedelta(minutes=25),
             location=_location("New York", "NY", "US", 40.7128, -74.0060),
             ip="203.0.113.60",
+            device=admin_device,
         ),
     )
 
-    # VPN user: sign-ins from the company's known egress, no risk events.
+    # VPN user: sign-ins from the company's known egress, marked as a trusted
+    # named network, on a known device, with no risk events.
     gina = by_upn[SCENARIO_UPNS["benign_vpn"]]
+    gina_device = context_by_upn[gina["userPrincipalName"]]["devices"][0]
+    vpn_details = [
+        {"networkType": "namedNetwork", "networkNames": [VPN_NETWORK_NAME]}
+    ]
     add(
         "benign_vpn",
         _signin(
             rng,
             user=gina,
             created=BASE_TIME + timedelta(minutes=5),
-            location=_location("Amsterdam", "North Holland", "NL", 52.3676, 4.9041),
+            location=_location("Seattle", "WA", "US", 47.6062, -122.3321),
             ip=KNOWN_VPN_EGRESS_IPS[0],
+            device=gina_device,
+            network_location_details=vpn_details,
         ),
         points_alert=False,
     )
@@ -513,8 +577,10 @@ def _plant_scenario_signins(
             rng,
             user=gina,
             created=BASE_TIME + timedelta(minutes=15),
-            location=_location("Amsterdam", "North Holland", "NL", 52.3676, 4.9041),
+            location=_location("Seattle", "WA", "US", 47.6062, -122.3321),
             ip=KNOWN_VPN_EGRESS_IPS[1],
+            device=gina_device,
+            network_location_details=vpn_details,
         ),
     )
 
@@ -522,24 +588,27 @@ def _plant_scenario_signins(
 
 
 def _plant_thin_data_signins(
-    rng: random.Random, by_upn: dict[str, dict]
+    rng: random.Random, by_upn: dict[str, dict], context_by_upn: dict[str, dict]
 ) -> tuple[list[dict], dict[str, dict]]:
     """One known user with 1-2 sign-ins and no directory audits."""
     thin = by_upn[THIN_DATA_UPN]
+    ctx = context_by_upn[THIN_DATA_UPN]
     events = [
         _signin(
             rng,
             user=thin,
             created=BASE_TIME - timedelta(hours=2),
-            location=_location("Chicago", "IL", "US", 41.8781, -87.6298),
-            ip=_random_ip(rng),
+            location=ctx["homeLocation"],
+            ip=ctx["ipAddresses"][0],
+            device=ctx["devices"][0],
         ),
         _signin(
             rng,
             user=thin,
             created=BASE_TIME - timedelta(hours=1),
-            location=_location("Chicago", "IL", "US", 41.8781, -87.6298),
-            ip=_random_ip(rng),
+            location=ctx["homeLocation"],
+            ip=ctx["ipAddresses"][-1],
+            device=ctx["devices"][-1],
         ),
     ]
     return events, {THIN_DATA_SCENARIO: events[-1]}
@@ -646,20 +715,20 @@ def _baseline_audits(
         ("Update conditional access policy", "Policy", "Policy updated."),
     ]
     audits: list[dict] = []
-    # The thin-data user must stay audit-free, so exclude them entirely.
-    eligible = [u for u in users if u["userPrincipalName"] != THIN_DATA_UPN]
-    admin_users = [u for u in eligible if u["userPrincipalName"] in ADMIN_UPNS]
-    role_targets = [
-        u for u in eligible if u["userPrincipalName"] not in SCENARIO_UPNS.values()
+    # Baseline noise must never target a scenario user, and only admins may
+    # initiate admin actions (password reset, role change, consent for others).
+    scenario_users = set(SCENARIO_UPNS.values())
+    eligible = [
+        u
+        for u in users
+        if u["userPrincipalName"] != THIN_DATA_UPN
+        and u["userPrincipalName"] not in scenario_users
     ]
+    admin_users = [u for u in users if u["userPrincipalName"] in ADMIN_UPNS]
     for _ in range(count):
         activity, category, reason = rng.choice(templates)
-        if category == "RoleManagement":
-            actor = rng.choice(admin_users)
-            target = rng.choice(role_targets)
-        else:
-            actor = rng.choice(eligible)
-            target = rng.choice(eligible)
+        actor = rng.choice(admin_users)
+        target = rng.choice(eligible)
         targets = [
             {
                 "id": target["id"],
@@ -787,11 +856,17 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict]]:
 
     users = _generate_users(rng, fake)
     by_upn = {u["userPrincipalName"]: u for u in users}
+    user_context = _build_user_context(rng, users)
+    context_by_upn = {c["userPrincipalName"]: c for c in user_context}
 
-    sign_ins = _baseline_signins(rng, users)
-    scenario_sign_ins, evidence = _plant_scenario_signins(rng, by_upn)
+    sign_ins = _baseline_signins(rng, users, context_by_upn)
+    scenario_sign_ins, evidence = _plant_scenario_signins(
+        rng, by_upn, context_by_upn
+    )
     sign_ins.extend(scenario_sign_ins)
-    thin_sign_ins, thin_evidence = _plant_thin_data_signins(rng, by_upn)
+    thin_sign_ins, thin_evidence = _plant_thin_data_signins(
+        rng, by_upn, context_by_upn
+    )
     sign_ins.extend(thin_sign_ins)
     evidence.update(thin_evidence)
 
@@ -806,6 +881,7 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict]]:
         "directory_audits": directory_audits,
         "alerts": alerts,
         "ground_truth": ground_truth,
+        "user_context": user_context,
     }
 
 
