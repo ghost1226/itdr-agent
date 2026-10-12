@@ -298,6 +298,13 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 
 1. ~~**Which free OpenRouter model?**~~ **Resolved (Checkpoint 5):** `google/gemma-4-31b-it:free`, confirmed free with a 262,144-token context on the OpenRouter models API and model page.
 2. ~~**Framework choice for Investigator.**~~ **Resolved (Checkpoint 4):** lightweight custom ReAct loop (exact cap, retry-once, fully mockable).
+3. **Eval model ≠ Checkpoint 5 model.** Gemma 4 31B (free) was rate-limited upstream; the evaluation runs on Nemotron 3 Super (free). Free models can change or vanish, so results may not reproduce later. Say so in PROJECT_BRIEF "Limits and risks".
+4. **Model overclaims actions.** Nemotron's `audit_notes` said "Containment steps executed as per playbook"; the agent executes nothing (same as HW4). Candidate fix: a prompt rule plus a code check rejecting "executed/applied" claims. Not built; talk with Joe first.
+5. **Orchestrator total timeout not enforced.** `timeout_seconds` (PLAN Checkpoint 6: 120 s total) is stored but unused; only the 90 s per-request client timeout applies. Fix needs Joe's OK.
+6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
+7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
+
+Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): Joe's vault, "ITDR Agent — Build Journal", "Problems to talk about".
 
 ## Commit History
 
