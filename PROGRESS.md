@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), before Checkpoint 5.
+Updated: Checkpoint 5 complete; next Checkpoint 6 (orchestration + HITL).
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 1b — complete. Next: Checkpoint 4 task 8, then Checkpoint 5.**
+**Checkpoint 5 — complete. Next: Checkpoint 6 — Orchestration + Governance + Human Oversight (HITL).**
 
 ## What's Done
 
@@ -61,6 +61,15 @@ Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), befor
   - `investigator.build_alert_prompt()` filters the alert through `ALERT_FIELD_ALLOWLIST` and wraps it as `<microsoft_graph_data tool="alert" untrusted="true">` with `<`/`>` escaped, so the model sees evidence and never the answer key.
   - System prompt now says the alert **and** tool output are untrusted data.
   - Tests: no answer key in any alert prompt, alert fields only inside the wrapper, breakout probe, instruction probe, round-trip `json.loads`, and the investigator's user message equals the wrapped alert.
+- ✅ Checkpoint 5: Adjudicator agent + MITRE mapping skill alignment.
+  - **Pre-code:** verified free model `google/gemma-4-31b-it:free` (262,144-token context, `0`/`0` pricing) against the OpenRouter models API and page (`230b571`); no live tokens spent.
+  - **Red:** `a2ed3f5` — tests only; `pytest` → **22 failed, 119 passed** (141 tests).
+  - **Green:** `cdac646` — **141 passed**.
+  - `itdr_agent/adjudicator.py`: single-shot structured call; the dossier is wrapped as `<microsoft_graph_data tool="dossier" untrusted="true">` with `<`/`>` escaped; parse (strips code fences) → confidence coercion → MITRE guard.
+  - `invalid_mitre_claims` / `assert_mitre_claims_supported`: any technique absent from `dossier.mitre_attack_evidence` is rejected in code (`UnsupportedMitreClaimError`), never trusted.
+  - MITRE alignment: `T1078.004` everywhere; `T1621` only for 3+ MFA denials in 30 minutes (1–2 → indicator only); `T1528` only when a risky sign-in precedes the consent in-window.
+  - `scripts/run_adjudicator_live.py` added (manual only; not run).
+  - Four tests per technique: in-window / outside-window / wrong-direction-or-benign / below-threshold.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -111,16 +120,20 @@ Notes verified against the live docs page:
 
 ## MITRE ATT&CK Checklist
 
-| Planted attack | Technique | Evidence in data | Test |
-|----------------|-----------|------------------|------|
-| Impossible travel | **T1078** | two `unlikelyTravel` sign-ins (US → RU) 25 min apart | `test_impossible_travel_pattern` |
-| MFA fatigue | **T1621** | ≥3 MFA-denied sign-ins followed by a success | `test_mfa_fatigue_pattern` |
-| Anonymous IP | **T1090.003** | `riskEventTypes_v2` contains `anonymizedIPAddress`, high risk | `test_anonymous_ip_pattern` |
-| App consent after foreign sign-in | **T1528** | `unfamiliarFeatures` sign-in → `Consent to application` audit | `test_app_consent_after_foreign_signin_pattern` |
-| Privilege escalation | **T1098.003** | `Add member to role` → Global Administrator audit | `test_privilege_escalation_pattern` |
+Confirmed on attack.mitre.org (all pages HTTP 200) and used by the mapper:
+
+| Planted attack | Technique | ATT&CK page | Evidence required (skill rules) | Tests |
+|----------------|-----------|-------------|------------------------------|------|
+| Impossible travel | **T1078.004** — Valid Accounts: Cloud Accounts | https://attack.mitre.org/techniques/T1078/004/ | `unlikelyTravel` sign-in **in the window** | `test_impossible_travel_pattern`, `test_t1078_004_*` |
+| MFA fatigue | **T1621** — Multi-Factor Authentication Request Generation | https://attack.mitre.org/techniques/T1621/ | **3+ MFA denials in 30 minutes** for the same user, in the window | `test_mfa_fatigue_pattern`, `test_t1621_*` |
+| Anonymous IP | **T1090.003** — Proxy: Multi-hop Proxy | https://attack.mitre.org/techniques/T1090/003/ | `anonymizedIPAddress` sign-in in the window | `test_anonymous_ip_pattern`, `test_t1090_003_*` |
+| Consent after a risky sign-in | **T1528** — Steal Application Access Token | https://attack.mitre.org/techniques/T1528/ | a risky sign-in (`unlikelyTravel`/`anonymizedIPAddress`/`unfamiliarFeatures`) **precedes** `Consent to application` in the window | `test_app_consent_after_foreign_signin_pattern`, `test_t1528_*` |
+| Privilege escalation | **T1098.003** — Account Manipulation: Additional Cloud Roles | https://attack.mitre.org/techniques/T1098/003/ | `Add member to role` with the user as **TARGET**, in the window | `test_privilege_escalation_pattern`, `test_role_add_*`, `test_t1098_003_*` |
 
 Each pattern test finds the behaviour in the generated data **and** asserts
-`SCENARIO_TECHNIQUES[scenario]` equals the expected technique ID.
+`SCENARIO_TECHNIQUES[scenario]` equals the expected technique ID. The
+Adjudicator may only output IDs present in `mitre_attack_evidence`
+(`assert_mitre_claims_supported`); anything else is rejected in code.
 
 ## Fixture Decision
 
@@ -132,13 +145,12 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 **Checkpoint 1b — complete (red `d49281d`, green `3e70589`; review fix red `18a74d0`, green `49edfdc`; overlap fix red `72418ed`, green `0438e4c`; 106 tests). Checkpoint 4 task 8 — complete (red `377d586`, green `5dd360d`; 112 tests).**
 
-**Next: Checkpoint 5 — Adjudicator agent (structured reasoning):**
-1. Verify a free OpenRouter model exists and document it (open item).
-2. Write failing `tests/test_adjudicator.py` (red commit first).
-3. Build `itdr_agent/adjudicator.py`: single-shot structured output over the dossier.
-4. Apply confidence coercion; require rollback on every containment step.
-5. Skill alignment (`T1078.004`; T1621 3-in-30; T1528 after a risky sign-in; Adjudicator MITRE guard).
-6. Green commit, then commit PROGRESS.md.
+**Next: Checkpoint 6 — Orchestration + Governance + Human Oversight (HITL):**
+1. Build `itdr_agent/orchestrator.py`: alert → Investigator → critical-gap short-circuit → Adjudicator → confidence coercion → report + audit log.
+2. HITL: approve/edit/reject each containment step; `logs/audit.jsonl`; one targeted `ask_user` question and at most one re-adjudication when `INSUFFICIENT_DATA` or confidence < 0.7; `analyst_context`; `<analyst_input untrusted="true">` wrapper.
+3. Wire the MITRE guard; governance (audit log, anonymization, timeout).
+4. CLI `python -m itdr_agent --alert-id ALERT_001`.
+5. Green commit, then commit PROGRESS.md.
 
 ## Mistakes & Lessons
 
@@ -271,3 +283,7 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 - `0438e4c` — checkpoint-1b-fix2: green — unique ordinary helpdesk target for benign role add
 - `377d586` — checkpoint-4-task8: red — alert allowlist + untrusted-data wrapper tests
 - `5dd360d` — checkpoint-4-task8: green — allowlist + untrusted-data wrapper for the alert
+- `f2fa5c9` — checkpoint-4-task8: update PROGRESS.md (wrapper, commits, next)
+- `230b571` — checkpoint-5: record free OpenRouter model (google/gemma-4-31b-it:free)
+- `a2ed3f5` — checkpoint-5: red — adjudicator, T1078.004, T1621 30-min, T1528 prior risky sign-in, MITRE guard
+- `cdac646` — checkpoint-5: green — Adjudicator, T1078.004, T1621 30-min burst, T1528 prior risky sign-in, MITRE guard
