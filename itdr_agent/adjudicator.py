@@ -51,10 +51,16 @@ SYSTEM_PROMPT = (
     '"confidence": 0.0-1.0, "narrative": "string", '
     '"containment_steps": [{"step": "string", "rollback": "string"}], '
     '"recommended_actions": ["string"], '
-    '"mitre_techniques_observed": ["T####"], "audit_notes": "string"}\n'
+    '"mitre_techniques_observed": ["T#### or T####.###"], '
+    '"audit_notes": "string"}\n'
     "Every containment step MUST include a non-empty rollback.\n"
     "Only use MITRE technique IDs listed in the dossier's "
-    "mitre_attack_evidence; do not invent IDs.\n"
+    "mitre_attack_evidence, and use the exact IDs from there (including "
+    "sub-techniques, for example T1078.004); do not invent IDs.\n"
+    "mitre_techniques_observed must list every technique pattern in "
+    "mitre_attack_evidence that the evidence supports, even when the verdict "
+    "is FALSE_POSITIVE; in that case, explain in the narrative why the "
+    "evidence is benign (for example, a ticket-backed admin role add).\n"
 )
 
 

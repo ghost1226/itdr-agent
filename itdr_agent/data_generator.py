@@ -379,7 +379,7 @@ def _plant_scenario_signins(
         if points_alert:
             evidence[scenario] = event
 
-    # 1. Impossible travel (T1078): New York -> Moscow within 25 minutes.
+    # 1. Impossible travel (T1078.004): New York -> Moscow within 25 minutes.
     alice = by_upn[SCENARIO_UPNS["impossible_travel"]]
     add(
         "impossible_travel",
