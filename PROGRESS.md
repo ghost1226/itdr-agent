@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 4 complete; awaiting Joe's go for Checkpoint 5.
+Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), before Checkpoint 5.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 4 — complete. Checkpoint 5 — not started (waiting for go).**
+**Checkpoint 1b — complete. Next: Checkpoint 4 task 8, then Checkpoint 5.**
 
 ## What's Done
 
@@ -55,6 +55,15 @@ Updated: Checkpoint 4 complete; awaiting Joe's go for Checkpoint 5.
   - MITRE derivation is now direction- and time-aware, and every technique carries its evidence ids (`mitre_attack_evidence`).
   - Tool-data wrapper escapes `<`/`>` (`\u003c`/`\u003e`) so a record cannot close the data block.
   - Background role changes are initiated only by `ADMIN_UPNS`; scenario users are never baseline role-add targets.
+- ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
+  - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
+  - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
+  - Three benign scenarios planted: `benign_travel` (same compliant device, no risk events), `benign_admin_role` (in-window, ticket-backed role add; investigated admin is the **target**), `benign_vpn` (known company egress IPs).
+  - Added one `thin_data` alert (known user, 1–2 sign-ins, no audits, **not** a critical gap → `INSUFFICIENT_DATA`) and one `unknown` alert (UPN absent from `users.jsonl` → critical gap).
+  - **Ground truth moved out of the model path:** `alerts.jsonl` is Graph-shaped only (`ALERT_FIELD_ALLOWLIST`); `scenario` / `expected_verdict` / `expected_mitre` / `is_benign` live in `data/fixtures/ground_truth.jsonl` (tests + `scripts/evaluate.py` only).
+  - `benign_admin_role` keeps `expected_mitre == ["T1098.003"]`: the pattern is real, so the mapper still emits it; legitimacy is the analyst's call.
+  - `tests/test_graph_fields.py` is the graph-field-check allowlist test (per resource). It caught `riskyUser.riskEventTypes_v2` — not a real `riskyUser` field — which is now removed and replaced with valid `riskyUser` fields.
+  - Same seed ⇒ byte-identical for all five files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
 
 ## Microsoft Graph Schema Sources
 
@@ -65,11 +74,16 @@ Field names in `itdr_agent/data_generator.py` follow these published shapes:
 | `signIn` (v1.0) | `riskEventTypes_v2`, `riskDetail`, `riskLevelAggregated`, `riskLevelDuringSignIn`, `riskState`, `status`, `deviceDetail`, `location`, `clientAppUsed`, `conditionalAccessStatus`, `correlationId` | https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0 |
 | `mfaDetail` (beta) | `authMethod`, `authDetail` | https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta |
 | `directoryAudit` (v1.0) | `activityDateTime`, `activityDisplayName`, `category`, `correlationId`, `initiatedBy`, `targetResources`, `result`, `resultReason`, `loggedByService` | https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0 |
+| `signInLocation` (v1.0) | `city`, `state`, `countryOrRegion`, `geoCoordinates` | https://learn.microsoft.com/en-us/graph/api/resources/signinlocation?view=graph-rest-1.0 |
+| `deviceDetail` (v1.0) | `deviceId`, `displayName`, `operatingSystem`, `browser`, `isCompliant`, `isManaged`, `trustType` | https://learn.microsoft.com/en-us/graph/api/resources/devicedetail?view=graph-rest-1.0 |
+| `user` (v1.0) | `id`, `userPrincipalName`, `displayName`, `department`, `jobTitle`, `manager`, `hireDate`, `accountEnabled` | https://learn.microsoft.com/en-us/graph/api/resources/user?view=graph-rest-1.0 |
+| `riskyUser` (v1.0) | `id`, `userDisplayName`, `userPrincipalName`, `riskLevel`, `riskState`, `riskDetail`, `riskLastUpdatedDateTime`, `isDeleted`, `isProcessing` | https://learn.microsoft.com/en-us/graph/api/resources/riskyuser?view=graph-rest-1.0 |
 
 Notes verified against the live docs page:
 - `riskEventTypes` is **deprecated**; we emit `riskEventTypes_v2`.
 - Valid `riskEventTypes_v2` values include `unlikelyTravel`, `anonymizedIPAddress`, `unfamiliarFeatures`.
 - Anonymous IP is therefore `riskEventTypes_v2 == ["anonymizedIPAddress"]`, **not** a `riskEventType` scalar.
+- `riskyUser` does **not** have `riskEventTypes_v2`; that field is on `signIn`. The `riskyUser` fields we use are confirmed on the `riskyUser` page above.
 
 ## MITRE ATT&CK Checklist
 
@@ -92,14 +106,20 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Waiting for Joe's go** before starting Checkpoint 5 (per AGENTS.md rule 9).
+**Checkpoint 1b — complete (red `d49281d`, green `3e70589`, 96 tests).**
 
-Checkpoint 5 — Adjudicator agent (structured reasoning):
+**Next (per Joe): Checkpoint 4 task 8, before Checkpoint 5** — the alert
+allowlist + untrusted-data wrapper + no-answer-key test, as its own red/green
+pair. Checkpoint 4 is otherwise done; this closes the gap where the whole alert
+record (including `scenario`) was sent to the model unwrapped.
+
+After that, Checkpoint 5 — Adjudicator agent (structured reasoning):
 1. Verify a free OpenRouter model exists and document it (open item).
 2. Write failing `tests/test_adjudicator.py` (red commit first).
 3. Build `itdr_agent/adjudicator.py`: single-shot structured output over the dossier.
 4. Apply confidence coercion; require rollback on every containment step.
-5. Green commit, then commit PROGRESS.md.
+5. Skill alignment (`T1078.004`; T1621 3-in-30; T1528 after a risky sign-in; Adjudicator MITRE guard).
+6. Green commit, then commit PROGRESS.md.
 
 ## Mistakes & Lessons
 
@@ -118,6 +138,7 @@ mistake made in this project, its root cause, and the rule that prevents it.
 | Started Checkpoint 2 before Checkpoint 1 fixes | Advanced without waiting for review | AGENTS.md rule 9: stop after each checkpoint, show evidence, wait | AGENTS.md rule 9 |
 | Mapped `T1098.003` from role adds the user merely initiated, with no time window | `_derive` treated any role add the user touched as escalation | Check direction (user must be the target) and confine to the investigation window; tie each technique to evidence ids | `541047f` / `2d9a680` |
 | Tool-data wrapper could be broken out of with `</microsoft_graph_data>` | `json.dumps` leaves `<`/`>` unescaped | Escape `<`/`>` to `\u003c`/`\u003e` so the closing tag appears exactly once | `541047f` / `2d9a680` |
+| Emitted `riskEventTypes_v2` on a `riskyUser` record | Copied a `signIn` field onto the `riskyUser` shape | Use the graph-field-check allowlist per resource; a field on one Graph resource is not valid on another | `3e70589` |
 
 Standing prevention rules distilled from the above:
 1. Verify external facts (schemas, enum values, technique IDs) against the
@@ -167,6 +188,10 @@ Standing prevention rules distilled from the above:
 | Each technique stores evidence ids (`mitre_attack_evidence`) | The Adjudicator can verify every MITRE claim against the exact sign-in/audit record it came from. |
 | Tool wrapper escapes `<`/`>` | A log field containing `</microsoft_graph_data>` cannot break out of the untrusted-data block. |
 | Background role changes only by `ADMIN_UPNS` | Ordinary staff (e.g. Sales) initiating role changes must not look like an attack; role adds are IT-admin noise, and baseline role targets exclude scenario users. |
+| Ground truth in `data/fixtures/ground_truth.jsonl` | Labels (`scenario`, `expected_verdict`, `expected_mitre`, `is_benign`) must never reach the model. Tests and `scripts/evaluate.py` are the only readers; `alerts.jsonl` stays Graph-shaped via `ALERT_FIELD_ALLOWLIST`. |
+| `benign_admin_role` keeps `T1098.003` in `expected_mitre` | The role-add pattern is real; deciding it is legitimate (helpdesk ticket) is the analyst's/Adjudicator's job, not the mapper's. |
+| Three benign + thin-data + unknown alerts | False-positive control and the low-confidence `ask_user` path need ground-truth cases. |
+| graph-field-check allowlist test per resource | Catches invented/renamed fields; it caught `riskyUser.riskEventTypes_v2`. |
 
 ## Open Problems
 
@@ -198,3 +223,6 @@ Standing prevention rules distilled from the above:
 - `f5f7ed3` — checkpoint-4: update PROGRESS.md with agent-loop and tool decisions
 - `541047f` — checkpoint-4-fix: red — MITRE direction/window/evidence tests and wrapper-breakout test
 - `2d9a680` — checkpoint-4-fix: green — direction/time-aware MITRE with evidence ids, escaped wrapper, admin-only role noise
+- `139ffea` — plan: rubric additions, ground-truth split, 3 approved project skills
+- `d49281d` — checkpoint-1b: red — benign/thin/unknown alerts, ground-truth split, graph field allowlist, riskyUser fix
+- `3e70589` — checkpoint-1b: green — benign/thin/unknown alerts, ground-truth split, field allowlist, riskyUser fix
