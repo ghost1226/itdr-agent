@@ -121,14 +121,15 @@ class RequestBudget:
         daily_budget: int,
         used_today: int = 0,
         clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
-        spacing: float = REQUEST_SPACING_SECONDS,
+        sleep: Callable[[float], None] | None = None,
+        spacing: float | None = None,
     ) -> None:
         self.daily_budget = daily_budget
         self.used_today = used_today
         self._clock = clock
-        self._sleep = sleep
-        self._spacing = spacing
+        self._sleep = sleep or time.sleep
+        # Read at run time so the module setting (and tests) can change it.
+        self._spacing = REQUEST_SPACING_SECONDS if spacing is None else spacing
         self._last: float | None = None
         self.start_run()
 
@@ -323,6 +324,8 @@ class SessionSummary:
     pending: int
     stopped_reason: str | None
     requests_today: int
+    selected_done: int = 0  # finished runs among the alerts this command ran
+    selected_total: int = 0
 
 
 def _load_state(path: Path) -> dict[str, Any]:
@@ -492,7 +495,17 @@ def run_evaluation(
         for n in range(1, planned_runs + 1)
         if (alert["id"], n) not in finished
     )
-    return SessionSummary(completed, pending, stopped, budget.used_today)
+    selected = [a for a in alerts if only is None or a["id"] in only]
+    selected_done = sum(
+        1
+        for alert in selected
+        for n in range(1, runs_per_alert + 1)
+        if (alert["id"], n) in finished
+    )
+    return SessionSummary(
+        completed, pending, stopped, budget.used_today,
+        selected_done, len(selected) * runs_per_alert,
+    )
 
 
 def estimate_days(per_run_requests: list[int], daily_budget: int) -> int:
@@ -694,6 +707,7 @@ def write_results_md(
     runs_per_alert: int,
     daily_budget: int,
     dry_run: bool,
+    sources: dict[str, int] | None = None,
 ) -> None:
     m = compute_metrics(records, ground_truth)
     expected_runs = len(ground_truth) * runs_per_alert
@@ -738,6 +752,15 @@ def write_results_md(
         "script and the tests; the agents never see it.",
         limits_line,
         f"- **Run days (UTC):** {', '.join(days) if days else 'none yet'}.",
+        *(
+            [
+                "- **Sources (one free account each, same code and model):** "
+                + ", ".join(f"{name}: {count} runs" for name, count in sources.items())
+                + "."
+            ]
+            if sources
+            else []
+        ),
         "",
         "## Headline metrics",
         "",
@@ -841,14 +864,19 @@ def main(argv: list[str] | None = None) -> int:
                       help="offline: no key, no network, writes eval/dry_run/")
     mode.add_argument("--live", action="store_true",
                       help="real free model; spends daily requests")
+    mode.add_argument("--combine", nargs="+", metavar="DIR",
+                      help="merge finished runs from several eval folders "
+                      "(for example yours and a partner's) into one report")
     parser.add_argument("--runs", type=int, default=RUNS_PER_ALERT)
     parser.add_argument("--alerts", nargs="+")
     parser.add_argument("--model", default=os.getenv("EVAL_MODEL", EVAL_DEFAULT_MODEL))
     parser.add_argument("--daily-budget", type=int, default=DEFAULT_DAILY_BUDGET)
-    parser.add_argument("--eval-dir", default=str(PROJECT_ROOT / "eval"))
+    parser.add_argument("--eval-dir", default=None,
+                        help="default: eval/ (eval/final/ with --combine)")
     args = parser.parse_args(argv)
 
-    eval_dir = Path(args.eval_dir)
+    default_dir = "final" if args.combine else ""
+    eval_dir = Path(args.eval_dir or PROJECT_ROOT / "eval" / default_dir)
     alerts = load_alerts(FIXTURES / "alerts.jsonl")
     ground_truth = load_ground_truth(FIXTURES / "ground_truth.jsonl")
     only = set(args.alerts) if args.alerts else None
@@ -882,8 +910,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Dry-run results: {dry_dir / 'results.md'}")
         return 0
 
+    if args.combine:
+        return _combine([Path(d) for d in args.combine], eval_dir, args.model,
+                        ground_truth, args.runs, args.daily_budget)
+
     if not args.live:
-        print("Choose --dry-run (offline) or --live (spends free daily requests).")
+        print("Choose --dry-run (offline), --live (spends free daily requests), "
+              "or --combine.")
         return 2
     if not config.OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY is not set. Add it to .env (gitignored).")
@@ -902,11 +935,75 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Requests used today (UTC): {summary.requests_today} of {args.daily_budget}")
     if summary.stopped_reason:
         print(f"Stopped: {summary.stopped_reason}")
-    elif summary.pending:
-        print(f"This session's runs are done; {summary.pending} runs still pending.")
-    else:
-        print("All runs complete.")
+    if only:
+        print(f"Your alerts: {summary.selected_done} of {summary.selected_total} "
+              "runs done")
+        if summary.selected_done == summary.selected_total:
+            print("All runs for your alerts are complete.")
+        else:
+            print("Run the same command again tomorrow to continue.")
+    elif not summary.stopped_reason:
+        if summary.pending:
+            print(f"This session's runs are done; {summary.pending} runs still "
+                  "pending.")
+        else:
+            print("All runs complete.")
     print(f"Results: {eval_dir / 'results.md'}")
+    return 0
+
+
+def _combine(
+    sources: list[Path],
+    out_dir: Path,
+    model: str,
+    ground_truth: dict[str, dict[str, Any]],
+    runs_per_alert: int,
+    daily_budget: int,
+) -> int:
+    """Merge finished runs from several eval folders into ``out_dir``."""
+    resolved = {s.resolve() for s in sources}
+    if out_dir.resolve() in resolved:
+        print("The output folder must not be one of the folders being combined.")
+        return 2
+    records: list[dict[str, Any]] = []
+    interruptions: list[dict[str, Any]] = []
+    seen: dict[tuple[str, int], str] = {}
+    counts: dict[str, int] = {}
+    for source in sources:
+        name = source.name
+        counts[name] = 0
+        for record in _read_jsonl(source / "raw.jsonl"):
+            if record.get("model") != model:
+                continue
+            key = (record["alert_id"], record["run"])
+            if key in seen:
+                print(f"Duplicate run {key[0]} run {key[1]} in both {seen[key]} "
+                      f"and {name}; nothing written.")
+                return 2
+            seen[key] = name
+            records.append({**record, "source": name})
+            counts[name] += 1
+        interruptions += [
+            {**r, "source": name}
+            for r in _read_jsonl(source / "interruptions.jsonl")
+            if r.get("model") == model
+        ]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    records.sort(key=lambda r: (r["alert_id"], r["run"]))
+    for filename, rows in (("raw.jsonl", records),
+                           ("interruptions.jsonl", interruptions)):
+        (out_dir / filename).write_text(
+            "".join(json.dumps(row, default=str) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+    write_results_md(
+        out_dir / "results.md", records, interruptions, ground_truth,
+        model=model, runs_per_alert=max(runs_per_alert, RUNS_PER_ALERT),
+        daily_budget=daily_budget, dry_run=False, sources=counts,
+    )
+    print(f"Combined {len(records)} runs from "
+          + ", ".join(f"{n} ({c})" for n, c in counts.items())
+          + f" into {out_dir / 'results.md'}")
     return 0
 
 
