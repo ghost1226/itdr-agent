@@ -42,6 +42,7 @@ SIGNIN_ALLOWLIST = {
     "deviceDetail",
     "mfaDetail",
     "location",
+    "networkLocationDetails",
 }
 
 DEVICE_DETAIL_ALLOWLIST = {
@@ -58,6 +59,15 @@ LOCATION_ALLOWLIST = {"city", "state", "countryOrRegion", "geoCoordinates"}
 GEO_ALLOWLIST = {"latitude", "longitude"}
 STATUS_ALLOWLIST = {"errorCode", "failureReason"}
 MFADETAIL_ALLOWLIST = {"authDetail", "authMethod"}
+# Beta-only signIn field. networkType values confirmed on the networkLocationDetail page.
+NETWORK_LOCATION_DETAIL_ALLOWLIST = {"networkNames", "networkType"}
+NETWORK_TYPES = {
+    "intranet",
+    "extranet",
+    "namedNetwork",
+    "trusted",
+    "unknownFutureValue",
+}
 
 AUDIT_ALLOWLIST = {
     "id",
@@ -122,6 +132,7 @@ LEARN_URLS = {
     "user": "https://learn.microsoft.com/en-us/graph/api/resources/user?view=graph-rest-1.0",
     "riskyUser": "https://learn.microsoft.com/en-us/graph/api/resources/riskyuser?view=graph-rest-1.0",
     "mfaDetail": "https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta",
+    "networkLocationDetail": "https://learn.microsoft.com/en-us/graph/api/resources/networklocationdetail?view=graph-rest-beta",
 }
 
 
@@ -140,6 +151,13 @@ def test_signin_records_use_confirmed_fields():
         assert _keys(event["status"]) <= STATUS_ALLOWLIST
         if event.get("mfaDetail") is not None:
             assert _keys(event["mfaDetail"]) <= MFADETAIL_ALLOWLIST
+
+
+def test_network_location_details_are_documented():
+    for event in get_store().sign_ins:
+        for detail in event.get("networkLocationDetails") or []:
+            assert _keys(detail) <= NETWORK_LOCATION_DETAIL_ALLOWLIST
+            assert detail["networkType"] in NETWORK_TYPES
 
 
 def test_audit_records_use_confirmed_fields():

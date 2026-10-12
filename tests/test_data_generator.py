@@ -26,8 +26,9 @@ Graph schema references (field names follow Microsoft's published shapes):
 from __future__ import annotations
 
 import json
+import math
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -128,6 +129,13 @@ GROUND_TRUTH_REQUIRED = {
     "is_benign": bool,
 }
 
+USER_CONTEXT_REQUIRED = {
+    "userPrincipalName": str,
+    "homeLocation": dict,
+    "devices": list,
+    "ipAddresses": list,
+}
+
 VALID_VERDICTS = {"COMPROMISED", "SUSPICIOUS", "FALSE_POSITIVE", "INSUFFICIENT_DATA"}
 
 # Every user/email must live in the synthetic domain.
@@ -176,6 +184,13 @@ def scenario_upns():
     from itdr_agent import data_generator
 
     return data_generator.SCENARIO_UPNS
+
+
+@pytest.fixture(scope="module")
+def context_by_upn(dataset):
+    return {
+        entry["userPrincipalName"]: entry for entry in dataset["user_context"]
+    }
 
 
 @pytest.fixture(scope="module")
@@ -310,7 +325,14 @@ def test_same_seed_is_byte_identical(tmp_path):
     second = tmp_path / "second"
     data_generator.write_fixtures(first, seed=42)
     data_generator.write_fixtures(second, seed=42)
-    for name in ("users", "sign_ins", "directory_audits", "alerts", "ground_truth"):
+    for name in (
+        "users",
+        "sign_ins",
+        "directory_audits",
+        "alerts",
+        "ground_truth",
+        "user_context",
+    ):
         a = (first / f"{name}.jsonl").read_bytes()
         b = (second / f"{name}.jsonl").read_bytes()
         assert a == b, f"{name}.jsonl differs between identical seeds"
@@ -652,7 +674,14 @@ def test_write_fixtures_creates_jsonl(tmp_path):
     from itdr_agent import data_generator
 
     data_generator.write_fixtures(tmp_path, seed=1337)
-    for name in ("users", "sign_ins", "directory_audits", "alerts", "ground_truth"):
+    for name in (
+        "users",
+        "sign_ins",
+        "directory_audits",
+        "alerts",
+        "ground_truth",
+        "user_context",
+    ):
         path = tmp_path / f"{name}.jsonl"
         assert path.exists(), f"missing fixture {path}"
         lines = [
@@ -675,3 +704,207 @@ def test_write_fixtures_creates_jsonl(tmp_path):
         if line.strip()
     ]:
         assert "alert_id" in record
+
+    for record in [
+        json.loads(line)
+        for line in (tmp_path / "user_context.jsonl").read_text().splitlines()
+        if line.strip()
+    ]:
+        assert "userPrincipalName" in record
+
+
+# --- Checkpoint 1b fix: realistic baseline, benign plausibility ------------
+
+
+def _parse(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def _haversine_km(a: dict, b: dict) -> float:
+    lat1 = math.radians(a["geoCoordinates"]["latitude"])
+    lon1 = math.radians(a["geoCoordinates"]["longitude"])
+    lat2 = math.radians(b["geoCoordinates"]["latitude"])
+    lon2 = math.radians(b["geoCoordinates"]["longitude"])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    )
+    return 2 * 6371.0 * math.asin(math.sqrt(h))
+
+
+def _window_events(dataset, upn, alert, hours=None):
+    from itdr_agent.investigator import INVESTIGATION_WINDOW_HOURS
+
+    if hours is None:
+        hours = INVESTIGATION_WINDOW_HOURS
+    alert_time = _parse(alert["createdDateTime"])
+    start = alert_time - timedelta(hours=hours)
+    end = alert_time + timedelta(hours=hours)
+    events = [
+        e
+        for e in dataset["sign_ins"]
+        if e["userPrincipalName"] == upn
+        and start <= _parse(e["createdDateTime"]) <= end
+    ]
+    return sorted(events, key=lambda e: e["createdDateTime"])
+
+
+def test_user_context_shape(dataset):
+    ctx = dataset["user_context"]
+    user_upns = {u["userPrincipalName"] for u in dataset["users"]}
+    assert {entry["userPrincipalName"] for entry in ctx} == user_upns
+    for entry in ctx:
+        _assert_shape(entry, USER_CONTEXT_REQUIRED, "user_context")
+        assert 1 <= len(entry["devices"]) <= 2, "1-2 known devices per user"
+        assert 2 <= len(entry["ipAddresses"]) <= 4, "small stable IP set"
+        device_ids = [d["deviceId"] for d in entry["devices"]]
+        assert len(device_ids) == len(set(device_ids))
+        for device in entry["devices"]:
+            _assert_shape(device, DEVICE_REQUIRED, "user_context.device")
+
+
+def test_baseline_signins_use_user_context(dataset, context_by_upn, scenario_upns):
+    from itdr_agent import data_generator
+
+    special = set(scenario_upns.values()) | {data_generator.THIN_DATA_UPN}
+    baseline_only = set(context_by_upn) - special
+    assert baseline_only, "expected some non-scenario users"
+    for upn in baseline_only:
+        entry = context_by_upn[upn]
+        device_ids = {d["deviceId"] for d in entry["devices"]}
+        events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
+        assert events, f"{upn} should have baseline sign-ins"
+        for event in events:
+            assert event["deviceDetail"]["deviceId"] in device_ids
+            assert event["ipAddress"] in entry["ipAddresses"]
+            assert event["location"] == entry["homeLocation"]
+
+
+def test_benign_travel_is_a_real_flight(dataset, scenario_upns):
+    upn = scenario_upns["benign_travel"]
+    travel = [
+        e
+        for e in dataset["sign_ins"]
+        if e["userPrincipalName"] == upn
+        and e["ipAddress"] in {BENIGN_TRAVEL_IP_1, BENIGN_TRAVEL_IP_2}
+    ]
+    assert len(travel) == 2
+    travel.sort(key=lambda e: e["createdDateTime"])
+    gap = _parse(travel[1]["createdDateTime"]) - _parse(travel[0]["createdDateTime"])
+    assert gap >= timedelta(hours=8), "London must be a real flight after New York"
+    assert (
+        travel[0]["deviceDetail"]["deviceId"]
+        == travel[1]["deviceDetail"]["deviceId"]
+    )
+    speed = _haversine_km(travel[0]["location"], travel[1]["location"]) / (
+        gap.total_seconds() / 3600
+    )
+    assert speed <= 900, f"benign travel speed {speed:.0f} km/h"
+
+
+def test_benign_vpn_uses_trusted_named_network(
+    dataset, scenario_upns, context_by_upn
+):
+    from itdr_agent import data_generator
+
+    upn = scenario_upns["benign_vpn"]
+    vpn = [
+        e
+        for e in dataset["sign_ins"]
+        if e["userPrincipalName"] == upn
+        and e["ipAddress"] in data_generator.KNOWN_VPN_EGRESS_IPS
+    ]
+    assert vpn, "expected VPN-egress sign-ins"
+    known_devices = {d["deviceId"] for d in context_by_upn[upn]["devices"]}
+    for event in vpn:
+        assert event["deviceDetail"]["deviceId"] in known_devices
+        details = event.get("networkLocationDetails") or []
+        assert details, "VPN sign-in must carry networkLocationDetails"
+        for detail in details:
+            assert detail["networkType"] in {"namedNetwork", "trusted", "intranet"}
+            assert any("Contoso" in name for name in detail["networkNames"])
+
+
+def test_only_admins_initiate_admin_actions(dataset):
+    from itdr_agent import data_generator
+
+    for audit in dataset["directory_audits"]:
+        initiator = audit["initiatedBy"]["user"]["userPrincipalName"]
+        if initiator in data_generator.ADMIN_UPNS:
+            continue
+        targets = {
+            t.get("userPrincipalName")
+            for t in audit["targetResources"]
+            if t.get("type") == "User"
+        }
+        assert audit["activityDisplayName"] == "Consent to application", (
+            f"non-admin {initiator} initiated {audit['activityDisplayName']}"
+        )
+        assert initiator in targets, "non-admin may only self-consent"
+
+
+def test_scenario_users_are_not_noise_targets(dataset, scenario_upns):
+    from itdr_agent import data_generator
+
+    planted = {
+        "dave.consent@contoso.com": "Consent to application",
+        "erin.admin@contoso.com": "Add member to role",
+        "it.admin@contoso.com": "Add member to role",
+    }
+    for upn in set(scenario_upns.values()) | {data_generator.THIN_DATA_UPN}:
+        for audit in dataset["directory_audits"]:
+            targets = {
+                t.get("userPrincipalName")
+                for t in audit["targetResources"]
+                if t.get("type") == "User"
+            }
+            if upn in targets:
+                assert audit["activityDisplayName"] == planted.get(upn), (
+                    f"noise audit targets scenario user {upn}: "
+                    f"{audit['activityDisplayName']}"
+                )
+
+
+def test_benign_alerts_are_physically_plausible(
+    dataset, scenario_upns, alerts_by_scenario, context_by_upn
+):
+    from itdr_agent import data_generator
+
+    for scenario in data_generator.BENIGN_SCENARIOS:
+        alert = alerts_by_scenario[scenario]
+        upn = alert["userPrincipalName"]
+        known_devices = {
+            d["deviceId"] for d in context_by_upn[upn]["devices"]
+        }
+        events = _window_events(dataset, upn, alert)
+
+        for event in events:
+            assert event["deviceDetail"]["deviceId"] in known_devices, (
+                f"{scenario}: unknown device in the investigation window"
+            )
+
+        for earlier, later in zip(events, events[1:]):
+            hours = (
+                _parse(later["createdDateTime"])
+                - _parse(earlier["createdDateTime"])
+            ).total_seconds() / 3600
+            if hours <= 0:
+                continue
+            speed = _haversine_km(earlier["location"], later["location"]) / hours
+            assert speed <= 900, (
+                f"{scenario}: {speed:.0f} km/h between "
+                f"{earlier['createdDateTime']} and {later['createdDateTime']}"
+            )
+
+        for audit in dataset["directory_audits"]:
+            targets = {
+                t.get("userPrincipalName")
+                for t in audit["targetResources"]
+                if t.get("type") == "User"
+            }
+            if upn in targets:
+                initiator = audit["initiatedBy"]["user"]["userPrincipalName"]
+                assert initiator in data_generator.ADMIN_UPNS, (
+                    f"{scenario}: non-admin {initiator} acted on {upn}"
+                )
