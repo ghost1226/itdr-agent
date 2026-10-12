@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 5 complete; next Checkpoint 6 (orchestration + HITL).
+Updated: Checkpoint 6 complete; next Checkpoint 7 (evaluation harness, needs Joe's go for live runs).
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 5 — complete. Next: Checkpoint 6 — Orchestration + Governance + Human Oversight (HITL).**
+**Checkpoint 6 — complete. Next: Checkpoint 7 — Evaluation harness (live free model; wait for Joe's go).**
 
 ## What's Done
 
@@ -83,6 +83,19 @@ Updated: Checkpoint 5 complete; next Checkpoint 6 (orchestration + HITL).
   - Each benign narrative comes from that alert's own evidence: travel = same known device + the real NY→London 8.2 h leg; role add = the `HD-1042` ticket in `resultReason`; VPN = the trusted named network `Contoso Corporate VPN`.
   - Verdict-specific output: `FALSE_POSITIVE` → "no containment required; continue monitoring"; `INSUFFICIENT_DATA` → no containment steps and recommends gathering sign-ins/audits then re-adjudicating; only compromised/suspicious keep the account-disable step.
   - New tests cover all 10 alerts: every claimed technique must be in that alert's `mitre_attack_evidence`, and benign/insufficient samples never contain "disable".
+- ✅ Checkpoint 5 fix 3 (Jessica): attack "expected" wording + empty benign containment + fact test.
+  - **Red:** `45ebedd` — tests only; `pytest` → **2 failed, 151 passed** (153 tests).
+  - **Green:** `8e8912c` — **153 passed**.
+  - `_role_note` says "expected" only for a `FALSE_POSITIVE` whose `resultReason` cites a ticket (`HD-\d+`); attack role adds read "an in-window role add".
+  - `FALSE_POSITIVE` samples return `containment_steps == []`; "continue monitoring" moves to `recommended_actions`.
+  - New test checks every narrative fact (cities, ISO times, device names, ticket ids, network/role names) against that alert's dossier, and "expected" only in FALSE_POSITIVE narratives.
+- ✅ Checkpoint 6: Orchestration + Governance + Human Oversight (HITL).
+  - **Red:** `efe5d05` — tests only; `pytest` → **12 failed, 153 passed** (165 tests).
+  - **Green:** `b6d266d` — **165 passed**; pip-audit clean.
+  - `itdr_agent/orchestrator.py`: anonymization gate → Investigator → critical-gap short-circuit (no LLM) → Adjudicator (coercion + MITRE guard) → one `ask_user` question if `INSUFFICIENT_DATA` or confidence < 0.7 → at most one re-adjudication → approve/edit/reject each containment step → `logs/audit.jsonl`.
+  - `itdr_agent/human.py`: frozen `ask_user` contract (`cancelled` is exactly "no decision has been supplied"), `ContainmentDecision`, `ScriptedReviewer`/`CliReviewer`.
+  - Analyst answers are wrapped in `<analyst_input untrusted="true">` (escaped), never inside the dossier block; the dossier gains `InvestigatorOutput.analyst_context`.
+  - `python -m itdr_agent --alert-id ALERT_001` (live) and `python scripts/demo_orchestrator.py` (offline, no tokens).
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -156,14 +169,13 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Checkpoint 1b — complete (red `d49281d`, green `3e70589`; review fix red `18a74d0`, green `49edfdc`; overlap fix red `72418ed`, green `0438e4c`; 106 tests). Checkpoint 4 task 8 — complete (red `377d586`, green `5dd360d`; 112 tests).**
+**Checkpoint 1b — complete ...; 106 tests). Checkpoint 4 task 8 — complete (`377d586`/`5dd360d`; 112 tests). Checkpoint 5 — complete (`a2ed3f5`/`cdac646`, then `2e6a950`/`221a907`, `01212d6`/`c6d7132`, `45ebedd`/`8e8912c`; 153 tests). Checkpoint 6 — complete (`efe5d05`/`b6d266d`; 165 tests).**
 
-**Next: Checkpoint 6 — Orchestration + Governance + Human Oversight (HITL):**
-1. Build `itdr_agent/orchestrator.py`: alert → Investigator → critical-gap short-circuit → Adjudicator → confidence coercion → report + audit log.
-2. HITL: approve/edit/reject each containment step; `logs/audit.jsonl`; one targeted `ask_user` question and at most one re-adjudication when `INSUFFICIENT_DATA` or confidence < 0.7; `analyst_context`; `<analyst_input untrusted="true">` wrapper.
-3. Wire the MITRE guard; governance (audit log, anonymization, timeout).
-4. CLI `python -m itdr_agent --alert-id ALERT_001`.
-5. Green commit, then commit PROGRESS.md.
+**Next: Checkpoint 7 — Evaluation harness (live free model; Joe's go required):**
+1. `scripts/evaluate.py`: all 10 alerts × 3 runs through the real orchestrator/model (`EVAL_MODEL`, default `google/gemma-4-31b-it:free`).
+2. Metrics: verdict accuracy (primary), attack-vs-benign detection (secondary), false positives, MITRE precision, multi-run agreement, tokens/seconds per run, failure table.
+3. Save `eval/results.md` + `eval/raw.jsonl`; offline `tests/test_evaluate.py` with a fake runner.
+4. **Do not run with the live key until Joe says go.**
 
 ## Mistakes & Lessons
 
@@ -304,3 +316,7 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 - `221a907` — checkpoint-5-fix: green — prompt guidance, faithful sample mocks, T1078.004 comment
 - `01212d6` — checkpoint-5-fix2: red — move samples to scripts, no ground truth in package, verdict-specific containment, all 10 alerts
 - `c6d7132` — checkpoint-5-fix2: green — samples under scripts, evidence-derived benign narratives, verdict-specific containment
+- `45ebedd` — checkpoint-5-fix3: red — expected only for ticket-backed FALSE_POSITIVE, no pseudo containment step, all-narrative-facts test
+- `8e8912c` — checkpoint-5-fix3: green — expected only for ticket-backed FALSE_POSITIVE, benign containment steps empty
+- `efe5d05` — checkpoint-6: red — orchestrator, HITL approve/edit/reject, one ask/re-adjudication, MITRE guard, short-circuit, anonymization
+- `b6d266d` — checkpoint-6: green — orchestrator, governance, HITL ask/review, MITRE guard wiring, CLI + offline demo
