@@ -1,6 +1,6 @@
 # ITDR Evaluation Results
 
-> **PARTIAL:** 1 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
+> **PARTIAL:** 6 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
 
 ## Method
 
@@ -15,30 +15,36 @@
 
 | Metric | Value |
 |---|---|
-| Runs complete | 1 of 30 (0 failed) |
+| Runs complete | 6 of 30 (0 failed) |
 | Exact verdict accuracy (primary; failed runs count as wrong) | 100.0% |
 | Exact verdict accuracy, runs that returned a verdict | 100.0% |
 | Majority-of-3 verdict accuracy (per alert) | 100.0% |
-| Attack-vs-benign detection (8 labeled alerts) | 100.0% (1 runs) |
+| Attack-vs-benign detection (8 labeled alerts) | 100.0% (6 runs) |
 | False positives (benign runs called COMPROMISED/SUSPICIOUS) | 0 of 0 |
-| MITRE precision | 100.0% (TP 1, FP 0) |
+| MITRE precision | 100.0% (TP 6, FP 0) |
 | MITRE recall | 100.0% (FN 0) |
-| Multi-run agreement | n/a |
-| Model requests | 8 total |
-| Tokens in / out | 11942 / 3028 total; 11942.0 / 3028.0 per run |
-| Seconds | 53.3 total; 53.3 per run |
+| Multi-run agreement | 100.0% |
+| Model requests | 38 total |
+| Tokens in / out | 64435 / 15435 total; 10739.2 / 2572.5 per run |
+| Seconds | 218.9 total; 36.5 per run |
 
 ## Per alert
 
 | Alert | Scenario | Expected | Run outcomes | Majority | Correct |
 |---|---|---|---|---|---|
-| ALERT_001 | impossible_travel | COMPROMISED | COMPROMISED | COMPROMISED | yes |
+| ALERT_001 | impossible_travel | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
+| ALERT_002 | mfa_fatigue | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
 
 ## Per run
 
 | Alert | Run | Verdict | Confidence | Techniques | Requests | Tokens in/out | Seconds | Error |
 |---|---|---|---|---|---|---|---|---|
 | ALERT_001 | 1 | COMPROMISED | 0.92 | T1078.004 | 8 | 11942/3028 | 53.3 | - |
+| ALERT_001 | 2 | COMPROMISED | 0.86 | T1078.004 | 6 | 7700/2431 | 28.4 | - |
+| ALERT_001 | 3 | COMPROMISED | 0.88 | T1078.004 | 7 | 9461/3319 | 43.7 | - |
+| ALERT_002 | 1 | COMPROMISED | 0.92 | T1621 | 5 | 9678/2252 | 26.5 | - |
+| ALERT_002 | 2 | COMPROMISED | 0.92 | T1621 | 7 | 16114/3131 | 40.5 | - |
+| ALERT_002 | 3 | COMPROMISED | 0.88 | T1621 | 5 | 9540/1274 | 26.4 | - |
 
 ## Failure table
 
