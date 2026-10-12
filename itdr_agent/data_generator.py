@@ -105,7 +105,7 @@ ALERT_FIELD_ALLOWLIST: list[str] = [
 
 # MITRE ATT&CK technique IDs mapped from the plan.
 SCENARIO_TECHNIQUES: dict[str, str] = {
-    "impossible_travel": "T1078",       # Valid Accounts
+    "impossible_travel": "T1078.004",   # Valid Accounts: Cloud Accounts
     "mfa_fatigue": "T1621",             # MFA Request Generation
     "anonymous_ip": "T1090.003",        # Proxy: Multi-hop Proxy
     "app_consent": "T1528",             # Steal Application Access Token

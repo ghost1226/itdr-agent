@@ -1,4 +1,4 @@
-{"alert_id": "ALERT_001", "scenario": "impossible_travel", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1078"], "is_benign": false}
+{"alert_id": "ALERT_001", "scenario": "impossible_travel", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1078.004"], "is_benign": false}
 {"alert_id": "ALERT_002", "scenario": "mfa_fatigue", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1621"], "is_benign": false}
 {"alert_id": "ALERT_003", "scenario": "anonymous_ip", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1090.003"], "is_benign": false}
 {"alert_id": "ALERT_004", "scenario": "app_consent", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1528"], "is_benign": false}

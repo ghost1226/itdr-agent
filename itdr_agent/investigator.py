@@ -38,10 +38,17 @@ MAX_TOOL_CALLS = 8
 INVESTIGATION_WINDOW_HOURS = 48
 
 MITRE_BY_RISK_EVENT = {
-    "unlikelyTravel": "T1078",
+    "unlikelyTravel": "T1078.004",
     "anonymizedIPAddress": "T1090.003",
 }
+RISKY_SIGN_IN_EVENTS = {
+    "unlikelyTravel",
+    "anonymizedIPAddress",
+    "unfamiliarFeatures",
+}
 MFA_TECHNIQUE = "T1621"
+MFA_FATIGUE_MIN_DENIALS = 3
+MFA_FATIGUE_WINDOW = timedelta(minutes=30)
 CONSENT_TECHNIQUE = "T1528"
 ROLE_ESCALATION_TECHNIQUE = "T1098.003"
 
@@ -260,10 +267,12 @@ def derive_indicators(
         if evidence_id not in mitre[technique]:
             mitre[technique].append(evidence_id)
 
+    in_window_signins: list[tuple[datetime, dict[str, Any]]] = []
     for event in evidence.get("sign_in_history", []):
         when = _parse_time(event["createdDateTime"])
         if not start <= when <= end:
             continue
+        in_window_signins.append((when, event))
         for risk_type in event.get("riskEventTypes_v2", []):
             indicators.add(risk_type)
             if risk_type in MITRE_BY_RISK_EVENT:
@@ -273,7 +282,25 @@ def derive_indicators(
             "failureReason", ""
         ):
             indicators.add("mfaFatigue")
-            record(MFA_TECHNIQUE, event["id"])
+
+    # T1621 requires a real fatigue pattern: 3+ MFA denials in 30 minutes.
+    mfa_denials = sorted(
+        (when, event["id"])
+        for when, event in in_window_signins
+        if event.get("status", {}).get("errorCode", 0) != 0
+        and "MFA" in event.get("status", {}).get("failureReason", "")
+    )
+    for window_start, _ in mfa_denials:
+        window_end = window_start + MFA_FATIGUE_WINDOW
+        burst = [
+            evidence_id
+            for when, evidence_id in mfa_denials
+            if window_start <= when <= window_end
+        ]
+        if len(burst) >= MFA_FATIGUE_MIN_DENIALS:
+            for evidence_id in burst:
+                record(MFA_TECHNIQUE, evidence_id)
+            break
 
     report = evidence.get("risky_user_report")
     if report:
@@ -283,6 +310,12 @@ def derive_indicators(
         if report.get("riskState") == "atRisk":
             indicators.add("riskyUserAtRisk")
 
+    risky_in_window = sorted(
+        when
+        for when, event in in_window_signins
+        if set(event.get("riskEventTypes_v2", [])) & RISKY_SIGN_IN_EVENTS
+    )
+
     for audit in evidence.get("directory_audits", []):
         when = _parse_time(audit["activityDateTime"])
         if not start <= when <= end:
@@ -290,7 +323,9 @@ def derive_indicators(
         activity = audit.get("activityDisplayName")
         if activity == "Consent to application":
             indicators.add(activity)
-            record(CONSENT_TECHNIQUE, audit["id"])
+            # T1528 only when a risky sign-in precedes the consent in-window.
+            if any(risky_when < when for risky_when in risky_in_window):
+                record(CONSENT_TECHNIQUE, audit["id"])
         elif activity == "Add member to role":
             targets = audit.get("targetResources", [])
             is_target = any(
