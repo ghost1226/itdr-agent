@@ -76,14 +76,14 @@ Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's
   - Adjudicator prompt now says `mitre_techniques_observed` lists **every** evidence-backed technique pattern, **even when the verdict is FALSE_POSITIVE** (explain the benign reason in the narrative), and shows `T#### or T####.###`, instructing the model to use the **exact IDs** from `mitre_attack_evidence` (sub-technique example `T1078.004`).
   - New `itdr_agent/samples.py` (later moved to `scripts/samples.py` in fix 2) builds deterministic, offline mocked sample reports whose narrative is composed from the real dossier, so it cannot invent evidence.
   - New `tests/test_mitre_ids.py` guard: no bare `T1078` in `itdr_agent/` or `scripts/`; fixed the stale `(T1078)` comment in `data_generator.py`.
-- ✅ Checkpoint 5 fix 2 (Jessica): samples moved to scripts, evidence-derived, verdict-specific.
+- ✅ Checkpoint 5 fix 2 (review): samples moved to scripts, evidence-derived, verdict-specific.
   - **Red:** `01212d6` — tests only; `pytest` → **6 failed, 144 passed** (150 tests).
   - **Green:** `c6d7132` — **150 passed**.
   - `itdr_agent/samples.py` deleted; `scripts/samples.py` reads `ground_truth.jsonl` (scripts/tests only). New test asserts nothing under `itdr_agent/` references ground truth (`data_generator.py` is the producer).
   - Each benign narrative comes from that alert's own evidence: travel = same known device + the real NY→London 8.2 h leg; role add = the `HD-1042` ticket in `resultReason`; VPN = the trusted named network `Contoso Corporate VPN`.
   - Verdict-specific output: `FALSE_POSITIVE` → "no containment required; continue monitoring"; `INSUFFICIENT_DATA` → no containment steps and recommends gathering sign-ins/audits then re-adjudicating; only compromised/suspicious keep the account-disable step.
   - New tests cover all 10 alerts: every claimed technique must be in that alert's `mitre_attack_evidence`, and benign/insufficient samples never contain "disable".
-- ✅ Checkpoint 5 fix 3 (Jessica): attack "expected" wording + empty benign containment + fact test.
+- ✅ Checkpoint 5 fix 3 (review): attack "expected" wording + empty benign containment + fact test.
   - **Red:** `45ebedd` — tests only; `pytest` → **2 failed, 151 passed** (153 tests).
   - **Green:** `8e8912c` — **153 passed**.
   - `_role_note` says "expected" only for a `FALSE_POSITIVE` whose `resultReason` cites a ticket (`HD-\d+`); attack role adds read "an in-window role add".
@@ -96,17 +96,18 @@ Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's
   - `itdr_agent/human.py`: frozen `ask_user` contract (`cancelled` is exactly "no decision has been supplied"), `ContainmentDecision`, `ScriptedReviewer`/`CliReviewer`.
   - Analyst answers are wrapped in `<analyst_input untrusted="true">` (escaped), never inside the dossier block; the dossier gains `InvestigatorOutput.analyst_context`.
   - `python -m itdr_agent --alert-id ALERT_001` (live) and `python scripts/demo_orchestrator.py` (offline, no tokens).
-  - **Review: passed (Jessica).** She ran the offline demo in a clean copy; the approve/edit/reject audit lines, the analyst-input breakout probe, and the ALERT_010 short-circuit all check out.
+  - **Review: passed.** The reviewer ran the offline demo in a clean copy; the approve/edit/reject audit lines, the analyst-input breakout probe, and the ALERT_010 short-circuit all check out.
 - ✅ Checkpoint 7 fix 1 (Pi): `run_id` on every audit line (`run`, `containment_decision`, `ask_user`, `re_adjudication`, `mitre_rejection`).
   - One commit `70217a0` (tests + code together, no separate red). Red verified afterwards: the new tests run against `0bd0f18` code → **3 failed, 6 passed**; at `70217a0` they pass.
-- ✅ Checkpoint 7: evaluation harness (built by Jessica; Pi's run stopped when its own OpenRouter key hit its spending cap, 2026-10-12). Pi's uncommitted draft was replaced; see Mistakes & Lessons for its gaps.
+- ✅ Checkpoint 7: evaluation harness (Pi's run stopped when its own OpenRouter key hit its spending cap, 2026-10-12; finished in a separate session). Pi's uncommitted draft was replaced; see Mistakes & Lessons for its gaps.
   - **Red:** `7e847f4` — tests + a stub `evaluate.py`; `pytest tests/test_evaluate.py` → **29 failed**, rest of suite 167 passed.
   - **Green:** `22dd74d` — **30 passed** (one live-wiring test added in green; proven by mutation: switching off request counting in `_chat` makes it fail). Full suite **197 passed**; pip-audit: **No known vulnerabilities found**.
   - `scripts/evaluate.py --live` runs every alert through the **real orchestrator** (`EVAL_MODEL`, default `google/gemma-4-31b-it:free`); `--dry-run` uses offline stand-ins (no key, no network) and writes only `eval/dry_run/`. No flag → refuses (exit 2).
   - **Budget:** `RequestBudget` counts every request before it is sent (failed runs count), spaces requests 3.1 s apart (≤ 20 in any 60 s), and a run starts only if its worst case (`MAX_REQUESTS_PER_RUN = 10`: 8 tool turns + the cap/final turn + 1 Adjudicator) still fits under the daily budget (default 45 < free cap 50). OpenAI SDK retries are off (`max_retries=0`).
   - **Resume:** `eval/raw.jsonl` (one line per finished run) is the resume point; `eval/state.json` holds the UTC day + requests used. A 429, the budget, or a 401/402/403 stops the session and leaves that run pending (`eval/interruptions.jsonl`); it is retried next session. MITRE rejection, invalid JSON, timeouts, other API errors → a failed run record, never a crash.
   - **Metrics:** exact verdict accuracy (failed runs count as wrong; also shown over scored runs), majority-of-3, attack-vs-benign detection over the 8 labeled attack/benign alerts, false positives, MITRE precision/recall (n/a when nothing predicted), multi-run agreement (errors are an outcome), tokens/seconds/requests totals and means, per-alert and per-run tables, failure table (wrong verdict with the model's own notes; missing technique says Investigator vs Adjudicator; unexpected technique; errors), interrupted attempts, caveats.
-  - **Review fixes (Jessica's own review):** red `f34b67e` (**4 failed**), green `f6cd9af` — **201 passed**. (1) 400/404 (wrong model id, unsupported `response_format`) now **stop** instead of recording 30 failed runs; (2) 5xx and connection errors **skip** the run (logged in `interruptions.jsonl`, retried next session) instead of scoring infrastructure as model failure; (3) `--alerts` limits only what runs — `results.md` and "Runs still pending" always cover all 10 alerts × 3, so a smoke test reads "1 of 30", not "all runs complete".
+  - **Review fixes (separate review pass):** red `f34b67e` (**4 failed**), green `f6cd9af` — **201 passed**. (1) 400/404 (wrong model id, unsupported `response_format`) now **stop** instead of recording 30 failed runs; (2) 5xx and connection errors **skip** the run (logged in `interruptions.jsonl`, retried next session) instead of scoring infrastructure as model failure; (3) `--alerts` limits only what runs — `results.md` and "Runs still pending" always cover all 10 alerts × 3, so a smoke test reads "1 of 30", not "all runs complete".
+  - **Split between two people (2026-10-12):** red `1ffb60f` (5 failing), green `55cddaa` — **206 passed**. Each person runs their own alerts on their own free account (`--alerts ...`, partner uses `--eval-dir eval/partner`); the run prints "Your alerts: X of Y runs done". `--combine eval eval/partner` merges both into `eval/final/` (raw + results, each run tagged with its source; refuses a run that appears twice; keeps only the chosen model). Split: Joe ALERT_001, 002, 003, 006, 009; partner ALERT_004, 005, 007, 008, 010. Budget spacing is now read at run time.
   - **Dry run:** 30 runs, 207 requests (6–7 per run with the offline tool script) → **about 5 days at 45/day; worst case 8**.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
@@ -126,7 +127,7 @@ Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's
   - Baseline audits are initiated only by `ADMIN_UPNS` and never target scenario users (the only non-admin initiator left is dave's self-consent).
   - New test `test_benign_alerts_are_physically_plausible`: whole investigation window on known devices, no consecutive leg > 900 km/h, no non-admin action on the user.
   - Same seed ⇒ byte-identical for all six files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
-- ✅ Checkpoint 1b fix 2 (Jessica): benign target is no longer shared with the privilege-escalation attack.
+- ✅ Checkpoint 1b fix 2 (review): benign target is no longer shared with the privilege-escalation attack.
   - **Red:** `72418ed` — tests only; `pytest` → **2 failed, 104 passed** (106 tests). The failure named the overlap exactly: `it.admin@contoso.com initiates privilege_escalation's planted audit`.
   - **Green:** `0438e4c` — **106 passed**; fixtures regenerated (users 30, sign-ins 133, audits 53, alerts 10, ground_truth 10, user_context 30).
   - `benign_admin_role` now investigates a new ordinary user, `helpdesk.agent@contoso.com`, who is in no other scenario and is not in `ADMIN_UPNS`. The role add is initiated by `sec.admin` and cites ticket `HD-1042`; `expected_mitre` stays `["T1098.003"]`.
@@ -357,3 +358,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `22dd74d` — checkpoint-7: green — evaluation harness: real orchestrator runs, request budget + pacing, resume, failure rows, metrics, dry run
 - `f34b67e` — checkpoint-7-fix: red — 400/404 stop, 5xx/connection errors skip and retry, subset runs report against the full plan
 - `f6cd9af` — checkpoint-7-fix: green — same
+- `1ffb60f` — checkpoint-7-split: red — per-person progress line and combining two people's results
+- `55cddaa` — checkpoint-7-split: green — per-person progress line and --combine for two people's results
