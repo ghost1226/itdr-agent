@@ -597,3 +597,52 @@ def test_live_runner_drives_real_orchestrator_and_counts_every_request(
     assert all(k["model"] == MODEL and k["temperature"] == 0 for k in completions.kwargs)
     audit = [json.loads(l) for l in (tmp_path / "audit.jsonl").read_text().splitlines()]
     assert audit and all(e["run_id"] == record["run_id"] for e in audit)
+
+
+# --- review fixes: config errors stop, infrastructure errors skip, full plan --
+
+
+def _status_error(code):
+    request = __import__("httpx").Request("POST", "https://openrouter.ai/api/v1")
+    response = __import__("httpx").Response(code, request=request)
+    return openai.APIStatusError(f"status {code}", response=response, body=None)
+
+
+@pytest.mark.parametrize("code", [400, 404])
+def test_model_config_errors_stop_without_recording(tmp_path, code):
+    summary = _run(tmp_path, _truth_runner(raise_on={("ALERT_001", 1): _status_error(code)}))
+    assert summary.stopped_reason == f"fatal:{code}"
+    assert _records(tmp_path) == []
+
+
+def test_server_and_connection_errors_skip_the_run_and_continue(tmp_path):
+    request = __import__("httpx").Request("POST", "https://openrouter.ai/api/v1")
+    runner = _truth_runner(
+        raise_on={
+            ("ALERT_002", 1): _status_error(502),
+            ("ALERT_003", 2): openai.APIConnectionError(request=request),
+        }
+    )
+    summary = _run(tmp_path, runner)
+    keys = {(r["alert_id"], r["run"]) for r in _records(tmp_path)}
+    assert len(keys) == 28
+    assert ("ALERT_002", 1) not in keys and ("ALERT_003", 2) not in keys
+    assert summary.stopped_reason is None
+    assert summary.pending == 2
+    kinds = [json.loads(l)["error"] for l in (tmp_path / "interruptions.jsonl").read_text().splitlines()]
+    assert kinds == ["api_error:502", "connection_error"]
+    _run(tmp_path, runner, today=DAY_2)
+    assert len(_records(tmp_path)) == 30
+
+
+def test_subset_run_reports_against_the_full_plan(tmp_path):
+    first = _alerts()[0]
+    summary = evaluate.run_evaluation(
+        _alerts(), _gt(), _truth_runner(),
+        runs_per_alert=1, eval_dir=tmp_path, model=MODEL, daily_budget=10_000,
+        today=lambda: DAY_1, clock=FakeClock().clock, sleep=lambda s: None,
+        only={first["id"]},
+    )
+    assert len(_records(tmp_path)) == 1
+    assert summary.pending == 29
+    assert "1 of 30" in (tmp_path / "results.md").read_text()
