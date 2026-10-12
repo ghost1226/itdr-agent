@@ -261,8 +261,11 @@ def derive_indicators(
 
     report = evidence.get("risky_user_report")
     if report:
-        for risk_type in report.get("riskEventTypes_v2", []):
-            indicators.add(risk_type)
+        level = report.get("riskLevel")
+        if level in {"medium", "high"}:
+            indicators.add(f"riskyUserRiskLevel:{level}")
+        if report.get("riskState") == "atRisk":
+            indicators.add("riskyUserAtRisk")
 
     for audit in evidence.get("directory_audits", []):
         when = _parse_time(audit["activityDateTime"])

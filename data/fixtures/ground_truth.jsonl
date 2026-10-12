@@ -1,0 +1,10 @@
+{"alert_id": "ALERT_001", "scenario": "impossible_travel", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1078"], "is_benign": false}
+{"alert_id": "ALERT_002", "scenario": "mfa_fatigue", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1621"], "is_benign": false}
+{"alert_id": "ALERT_003", "scenario": "anonymous_ip", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1090.003"], "is_benign": false}
+{"alert_id": "ALERT_004", "scenario": "app_consent", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1528"], "is_benign": false}
+{"alert_id": "ALERT_005", "scenario": "privilege_escalation", "expected_verdict": "COMPROMISED", "expected_mitre": ["T1098.003"], "is_benign": false}
+{"alert_id": "ALERT_006", "scenario": "benign_travel", "expected_verdict": "FALSE_POSITIVE", "expected_mitre": [], "is_benign": true}
+{"alert_id": "ALERT_007", "scenario": "benign_admin_role", "expected_verdict": "FALSE_POSITIVE", "expected_mitre": ["T1098.003"], "is_benign": true}
+{"alert_id": "ALERT_008", "scenario": "benign_vpn", "expected_verdict": "FALSE_POSITIVE", "expected_mitre": [], "is_benign": true}
+{"alert_id": "ALERT_009", "scenario": "thin_data", "expected_verdict": "INSUFFICIENT_DATA", "expected_mitre": [], "is_benign": false}
+{"alert_id": "ALERT_010", "scenario": "unknown", "expected_verdict": "INSUFFICIENT_DATA", "expected_mitre": [], "is_benign": false}

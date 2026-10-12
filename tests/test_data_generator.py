@@ -582,7 +582,7 @@ def test_ground_truth_matches_scenario_maps(dataset):
     from itdr_agent import data_generator
 
     gt = {entry["scenario"]: entry for entry in dataset["ground_truth"]}
-    assert set(gt) == set(data_generator.SCENARIO_EXPECTED_VERDICT)
+    assert set(data_generator.SCENARIO_EXPECTED_VERDICT) <= set(gt)
     for scenario, verdict in data_generator.SCENARIO_EXPECTED_VERDICT.items():
         assert gt[scenario]["expected_verdict"] == verdict
         assert (

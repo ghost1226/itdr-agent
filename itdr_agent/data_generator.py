@@ -45,13 +45,51 @@ SYNTHETIC_DOMAIN = "contoso.com"
 ADMIN_UPNS: list[str] = ["it.admin@contoso.com", "sec.admin@contoso.com"]
 
 # Public contract: scenario -> synthetic UPN. Tests key off this.
+# Five attack scenarios, then three benign (false-positive) scenarios.
 SCENARIO_UPNS: dict[str, str] = {
     "impossible_travel": f"alice.traveler@{SYNTHETIC_DOMAIN}",
     "mfa_fatigue": f"bob.fatigue@{SYNTHETIC_DOMAIN}",
     "anonymous_ip": f"carol.anon@{SYNTHETIC_DOMAIN}",
     "app_consent": f"dave.consent@{SYNTHETIC_DOMAIN}",
     "privilege_escalation": f"erin.admin@{SYNTHETIC_DOMAIN}",
+    "benign_travel": f"frank.traveler@{SYNTHETIC_DOMAIN}",
+    # The investigated admin is the TARGET of the legitimate role add.
+    "benign_admin_role": ADMIN_UPNS[0],
+    "benign_vpn": f"gina.vpn@{SYNTHETIC_DOMAIN}",
 }
+
+BENIGN_SCENARIOS: list[str] = [
+    "benign_travel",
+    "benign_admin_role",
+    "benign_vpn",
+]
+
+# A known baseline user with intentionally sparse history: 1-2 sign-ins and
+# no directory audits. Not a critical gap (profile + sign-ins both exist).
+THIN_DATA_UPN: str = f"user05@{SYNTHETIC_DOMAIN}"
+THIN_DATA_SCENARIO = "thin_data"
+UNKNOWN_SCENARIO = "unknown"
+UNKNOWN_ALERT_UPN: str = f"ghost.user@{SYNTHETIC_DOMAIN}"
+
+# Company VPN egress IPs (RFC 5737 documentation range). Sign-ins from these
+# addresses are expected and must not be treated as anonymizing.
+KNOWN_VPN_EGRESS_IPS: list[str] = ["198.51.100.10", "198.51.100.11"]
+
+# Alerts are Graph-shaped only. Ground truth (scenario, expected verdict,
+# expected MITRE, is_benign) lives in data/fixtures/ground_truth.jsonl and is
+# never sent to the model.
+ALERT_FIELD_ALLOWLIST: list[str] = [
+    "id",
+    "createdDateTime",
+    "userPrincipalName",
+    "appDisplayName",
+    "ipAddress",
+    "location",
+    "riskLevelAggregated",
+    "riskState",
+    "riskEventTypes_v2",
+    "status",
+]
 
 # MITRE ATT&CK technique IDs mapped from the plan.
 SCENARIO_TECHNIQUES: dict[str, str] = {
@@ -60,6 +98,27 @@ SCENARIO_TECHNIQUES: dict[str, str] = {
     "anonymous_ip": "T1090.003",        # Proxy: Multi-hop Proxy
     "app_consent": "T1528",             # Steal Application Access Token
     "privilege_escalation": "T1098.003",  # Account Manipulation: Additional Cloud Roles
+}
+
+# Ground truth for scoring (Checkpoint 7). Never sent to the model.
+SCENARIO_EXPECTED_VERDICT: dict[str, str] = {
+    "impossible_travel": "COMPROMISED",
+    "mfa_fatigue": "COMPROMISED",
+    "anonymous_ip": "COMPROMISED",
+    "app_consent": "COMPROMISED",
+    "privilege_escalation": "COMPROMISED",
+    "benign_travel": "FALSE_POSITIVE",
+    "benign_admin_role": "FALSE_POSITIVE",
+    "benign_vpn": "FALSE_POSITIVE",
+}
+
+SCENARIO_EXPECTED_MITRE: dict[str, list[str]] = {
+    **{scenario: [technique] for scenario, technique in SCENARIO_TECHNIQUES.items()},
+    "benign_travel": [],
+    # The mapper still emits T1098.003: the pattern is real. Deciding that it
+    # is expected is the analyst's/Adjudicator's job, not the mapper's.
+    "benign_admin_role": ["T1098.003"],
+    "benign_vpn": [],
 }
 
 _NORMAL_LOCATIONS = [
@@ -136,6 +195,7 @@ def _signin(
     risk_event_types: list[str] | None = None,
     ca_status: str = "success",
     managed_device: bool = True,
+    device: dict | None = None,
     mfa_detail: dict | None = None,
 ) -> dict:
     """Build one signIn resource using Microsoft Graph field names."""
@@ -155,7 +215,11 @@ def _signin(
         "riskState": risk_state,
         "riskEventTypes_v2": risk_event_types or [],
         "status": {"errorCode": error_code, "failureReason": failure_reason},
-        "deviceDetail": _device(rng, managed=managed_device),
+        "deviceDetail": (
+            device
+            if device is not None
+            else _device(rng, managed=managed_device)
+        ),
         "mfaDetail": mfa_detail,
         "location": location,
     }
@@ -207,25 +271,33 @@ def _user_record(fake: Faker, rng: random.Random, upn: str, display: str) -> dic
 
 def _generate_users(rng: random.Random, fake: Faker) -> list[dict]:
     users: list[dict] = []
+    seen: set[str] = set()
+
+    def append_user(upn: str, display: str, **overrides) -> None:
+        if upn in seen:
+            return
+        seen.add(upn)
+        record = _user_record(fake, rng, upn, display)
+        record.update(overrides)
+        users.append(record)
+
     for scenario, upn in SCENARIO_UPNS.items():
         local = upn.split("@")[0].replace(".", " ").title()
-        users.append(_user_record(fake, rng, upn, local))
+        append_user(upn, local)
     for i in range(20):
-        name = fake.name()
-        upn = f"user{i:02d}@{SYNTHETIC_DOMAIN}"
-        users.append(_user_record(fake, rng, upn, name))
+        append_user(f"user{i:02d}@{SYNTHETIC_DOMAIN}", fake.name())
     for upn in ADMIN_UPNS:
         display = upn.split("@")[0].replace(".", " ").title()
-        record = _user_record(fake, rng, upn, display)
-        record["department"] = "IT"
-        record["jobTitle"] = "Administrator"
-        users.append(record)
+        append_user(upn, display, department="IT", jobTitle="Administrator")
     return users
 
 
 def _baseline_signins(rng: random.Random, users: list[dict]) -> list[dict]:
     events: list[dict] = []
     for user in users:
+        if user["userPrincipalName"] == THIN_DATA_UPN:
+            # Thin-data user gets an intentionally tiny, dedicated history.
+            continue
         for _ in range(4):
             created = BASE_TIME - timedelta(hours=rng.randint(1, 72))
             loc = _location(*rng.choice(_NORMAL_LOCATIONS))
@@ -243,12 +315,19 @@ def _baseline_signins(rng: random.Random, users: list[dict]) -> list[dict]:
 
 def _plant_scenario_signins(
     rng: random.Random, by_upn: dict[str, dict]
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, dict]]:
     events: list[dict] = []
+    evidence: dict[str, dict] = {}
+
+    def add(scenario: str, event: dict, *, points_alert: bool = True) -> None:
+        events.append(event)
+        if points_alert:
+            evidence[scenario] = event
 
     # 1. Impossible travel (T1078): New York -> Moscow within 25 minutes.
     alice = by_upn[SCENARIO_UPNS["impossible_travel"]]
-    events.append(
+    add(
+        "impossible_travel",
         _signin(
             rng,
             user=alice,
@@ -259,9 +338,10 @@ def _plant_scenario_signins(
             risk_level_aggregated="high",
             risk_level_during_sign_in="high",
             risk_event_types=["unlikelyTravel"],
-        )
+        ),
     )
-    events.append(
+    add(
+        "impossible_travel",
         _signin(
             rng,
             user=alice,
@@ -273,13 +353,15 @@ def _plant_scenario_signins(
             risk_level_during_sign_in="high",
             risk_event_types=["unlikelyTravel"],
             ca_status="failure",
-        )
+        ),
+        points_alert=False,
     )
 
     # 2. MFA fatigue (T1621): repeated denials, then a success.
     bob = by_upn[SCENARIO_UPNS["mfa_fatigue"]]
     for offset in (0, 2, 4, 6):
-        events.append(
+        add(
+            "mfa_fatigue",
             _signin(
                 rng,
                 user=bob,
@@ -293,9 +375,11 @@ def _plant_scenario_signins(
                 risk_level_during_sign_in="medium",
                 ca_status="failure",
                 mfa_detail=_mfa("PhoneAppNotification", "Push notification denied"),
-            )
+            ),
+            points_alert=(offset == 0),
         )
-    events.append(
+    add(
+        "mfa_fatigue",
         _signin(
             rng,
             user=bob,
@@ -306,12 +390,14 @@ def _plant_scenario_signins(
             risk_level_aggregated="medium",
             risk_level_during_sign_in="medium",
             mfa_detail=_mfa("PhoneAppNotification", "Push notification approved"),
-        )
+        ),
+        points_alert=False,
     )
 
     # 3. Anonymous IP / anonymizing proxy (T1090.003).
     carol = by_upn[SCENARIO_UPNS["anonymous_ip"]]
-    events.append(
+    add(
+        "anonymous_ip",
         _signin(
             rng,
             user=carol,
@@ -324,12 +410,13 @@ def _plant_scenario_signins(
             risk_event_types=["anonymizedIPAddress"],
             ca_status="failure",
             managed_device=False,
-        )
+        ),
     )
 
     # 4. Foreign/anomalous sign-in preceding app consent (T1528).
     dave = by_upn[SCENARIO_UPNS["app_consent"]]
-    events.append(
+    add(
+        "app_consent",
         _signin(
             rng,
             user=dave,
@@ -342,13 +429,14 @@ def _plant_scenario_signins(
             risk_event_types=["unfamiliarFeatures"],
             ca_status="failure",
             managed_device=False,
-        )
+        ),
     )
 
     # 5. Privilege escalation (T1098.003): the role change follows a risky
     # session, so the alert has a real sign-in to point at.
     erin = by_upn[SCENARIO_UPNS["privilege_escalation"]]
-    events.append(
+    add(
+        "privilege_escalation",
         _signin(
             rng,
             user=erin,
@@ -361,9 +449,100 @@ def _plant_scenario_signins(
             risk_event_types=["unfamiliarFeatures"],
             ca_status="failure",
             managed_device=False,
-        )
+        ),
     )
-    return events
+
+    # --- Benign (false-positive) scenarios --------------------------------
+    # Real travel: same known, compliant device, no risk events afterwards.
+    frank = by_upn[SCENARIO_UPNS["benign_travel"]]
+    travel_device = _device(rng, managed=True)
+    add(
+        "benign_travel",
+        _signin(
+            rng,
+            user=frank,
+            created=BASE_TIME + timedelta(minutes=5),
+            location=_location("New York", "NY", "US", 40.7128, -74.0060),
+            ip="203.0.113.50",
+            device=travel_device,
+        ),
+        points_alert=False,
+    )
+    add(
+        "benign_travel",
+        _signin(
+            rng,
+            user=frank,
+            created=BASE_TIME + timedelta(minutes=20),
+            location=_location("London", "England", "GB", 51.5074, -0.1278),
+            ip="203.0.113.51",
+            device=travel_device,
+        ),
+    )
+
+    # Expected admin role add: a dedicated sign-in so the alert fires on the
+    # target and the in-window role add is visible.
+    admin_target = by_upn[SCENARIO_UPNS["benign_admin_role"]]
+    add(
+        "benign_admin_role",
+        _signin(
+            rng,
+            user=admin_target,
+            created=BASE_TIME + timedelta(minutes=25),
+            location=_location("New York", "NY", "US", 40.7128, -74.0060),
+            ip="203.0.113.60",
+        ),
+    )
+
+    # VPN user: sign-ins from the company's known egress, no risk events.
+    gina = by_upn[SCENARIO_UPNS["benign_vpn"]]
+    add(
+        "benign_vpn",
+        _signin(
+            rng,
+            user=gina,
+            created=BASE_TIME + timedelta(minutes=5),
+            location=_location("Amsterdam", "North Holland", "NL", 52.3676, 4.9041),
+            ip=KNOWN_VPN_EGRESS_IPS[0],
+        ),
+        points_alert=False,
+    )
+    add(
+        "benign_vpn",
+        _signin(
+            rng,
+            user=gina,
+            created=BASE_TIME + timedelta(minutes=15),
+            location=_location("Amsterdam", "North Holland", "NL", 52.3676, 4.9041),
+            ip=KNOWN_VPN_EGRESS_IPS[1],
+        ),
+    )
+
+    return events, evidence
+
+
+def _plant_thin_data_signins(
+    rng: random.Random, by_upn: dict[str, dict]
+) -> tuple[list[dict], dict[str, dict]]:
+    """One known user with 1-2 sign-ins and no directory audits."""
+    thin = by_upn[THIN_DATA_UPN]
+    events = [
+        _signin(
+            rng,
+            user=thin,
+            created=BASE_TIME - timedelta(hours=2),
+            location=_location("Chicago", "IL", "US", 41.8781, -87.6298),
+            ip=_random_ip(rng),
+        ),
+        _signin(
+            rng,
+            user=thin,
+            created=BASE_TIME - timedelta(hours=1),
+            location=_location("Chicago", "IL", "US", 41.8781, -87.6298),
+            ip=_random_ip(rng),
+        ),
+    ]
+    return events, {THIN_DATA_SCENARIO: events[-1]}
 
 
 def _plant_scenario_audits(
@@ -418,6 +597,39 @@ def _plant_scenario_audits(
     )
     audits.append(audit)
     assert erin["userPrincipalName"] in json.dumps(audit["targetResources"])
+
+    # Benign: a legitimate, ticket-backed role add. The investigated admin is
+    # the TARGET; another ADMIN_UPNS account is the initiator. The mapper still
+    # emits T1098.003 (the pattern is real); the Adjudicator weighs the ticket
+    # context and should return FALSE_POSITIVE.
+    target_admin = by_upn[SCENARIO_UPNS["benign_admin_role"]]
+    initiator = by_upn[ADMIN_UPNS[1]]
+    audits.append(
+        _audit(
+            rng,
+            created=BASE_TIME + timedelta(minutes=30),
+            activity="Add member to role",
+            category="RoleManagement",
+            initiator=initiator,
+            targets=[
+                {
+                    "id": _new_id(rng),
+                    "displayName": "Helpdesk Administrator",
+                    "type": "Role",
+                },
+                {
+                    "id": target_admin["id"],
+                    "displayName": target_admin["displayName"],
+                    "type": "User",
+                    "userPrincipalName": target_admin["userPrincipalName"],
+                },
+            ],
+            result_reason=(
+                "Member added to role Helpdesk Administrator for helpdesk "
+                "ticket HD-1042."
+            ),
+        )
+    )
     return audits
 
 
@@ -434,9 +646,11 @@ def _baseline_audits(
         ("Update conditional access policy", "Policy", "Policy updated."),
     ]
     audits: list[dict] = []
-    admin_users = [u for u in users if u["userPrincipalName"] in ADMIN_UPNS]
+    # The thin-data user must stay audit-free, so exclude them entirely.
+    eligible = [u for u in users if u["userPrincipalName"] != THIN_DATA_UPN]
+    admin_users = [u for u in eligible if u["userPrincipalName"] in ADMIN_UPNS]
     role_targets = [
-        u for u in users if u["userPrincipalName"] not in SCENARIO_UPNS.values()
+        u for u in eligible if u["userPrincipalName"] not in SCENARIO_UPNS.values()
     ]
     for _ in range(count):
         activity, category, reason = rng.choice(templates)
@@ -444,8 +658,8 @@ def _baseline_audits(
             actor = rng.choice(admin_users)
             target = rng.choice(role_targets)
         else:
-            actor = rng.choice(users)
-            target = rng.choice(users)
+            actor = rng.choice(eligible)
+            target = rng.choice(eligible)
         targets = [
             {
                 "id": target["id"],
@@ -482,43 +696,84 @@ def _baseline_audits(
     return audits
 
 
-def _alert_source(scenario: str, upn: str, sign_ins: list[dict]) -> dict:
-    """Pick the sign-in that actually demonstrates each planted pattern."""
-    events = [e for e in sign_ins if e["userPrincipalName"] == upn]
-    if scenario == "impossible_travel":
-        return next(e for e in events if "unlikelyTravel" in e["riskEventTypes_v2"])
-    if scenario == "anonymous_ip":
-        return next(e for e in events if "anonymizedIPAddress" in e["riskEventTypes_v2"])
-    if scenario == "app_consent":
-        return next(e for e in events if "unfamiliarFeatures" in e["riskEventTypes_v2"])
-    if scenario == "mfa_fatigue":
-        return next(e for e in events if "MFA" in e["status"]["failureReason"])
-    # privilege_escalation: point at its risky session.
-    return next(e for e in events if e["riskState"] == "atRisk")
+def _alert_from_signin(alert_id: str, source: dict) -> dict:
+    """Build a Graph-shaped alert from a sign-in record (no ground truth)."""
+    return {
+        "id": alert_id,
+        "createdDateTime": source["createdDateTime"],
+        "userPrincipalName": source["userPrincipalName"],
+        "appDisplayName": source["appDisplayName"],
+        "ipAddress": source["ipAddress"],
+        "location": source["location"],
+        "riskLevelAggregated": source["riskLevelAggregated"],
+        "riskState": source["riskState"],
+        "riskEventTypes_v2": list(source["riskEventTypes_v2"]),
+        "status": dict(source["status"]),
+    }
+
+
+def _unknown_alert(alert_id: str) -> dict:
+    """An alert whose user is absent from users.jsonl (critical gap)."""
+    return {
+        "id": alert_id,
+        "createdDateTime": _iso(BASE_TIME + timedelta(minutes=90)),
+        "userPrincipalName": UNKNOWN_ALERT_UPN,
+        "appDisplayName": "Azure Portal",
+        "ipAddress": "203.0.113.99",
+        "location": _location("Unknown", "", "US", 0.0, 0.0),
+        "riskLevelAggregated": "none",
+        "riskState": "none",
+        "riskEventTypes_v2": [],
+        "status": {"errorCode": 0, "failureReason": ""},
+    }
 
 
 def _generate_alerts(
-    rng: random.Random, sign_ins: list[dict]
-) -> list[dict]:
+    evidence: dict[str, dict],
+) -> tuple[list[dict], list[dict]]:
+    """Return (alerts, ground_truth), kept strictly separate."""
     alerts: list[dict] = []
-    for index, (scenario, upn) in enumerate(SCENARIO_UPNS.items(), start=1):
-        source = _alert_source(scenario, upn, sign_ins)
-        alerts.append(
+    ground_truth: list[dict] = []
+    scenarios = list(SCENARIO_UPNS)
+
+    for index, scenario in enumerate(scenarios, start=1):
+        alert_id = f"ALERT_{index:03d}"
+        alerts.append(_alert_from_signin(alert_id, evidence[scenario]))
+        ground_truth.append(
             {
-                "id": f"ALERT_{index:03d}",
-                "createdDateTime": source["createdDateTime"],
-                "userPrincipalName": source["userPrincipalName"],
-                "appDisplayName": source["appDisplayName"],
-                "ipAddress": source["ipAddress"],
-                "location": source["location"],
-                "riskLevelAggregated": source["riskLevelAggregated"],
-                "riskState": source["riskState"],
-                "riskEventTypes_v2": list(source["riskEventTypes_v2"]),
-                "status": dict(source["status"]),
+                "alert_id": alert_id,
                 "scenario": scenario,
+                "expected_verdict": SCENARIO_EXPECTED_VERDICT[scenario],
+                "expected_mitre": list(SCENARIO_EXPECTED_MITRE[scenario]),
+                "is_benign": scenario in BENIGN_SCENARIOS,
             }
         )
-    return alerts
+
+    thin_index = len(scenarios) + 1
+    thin_id = f"ALERT_{thin_index:03d}"
+    alerts.append(_alert_from_signin(thin_id, evidence[THIN_DATA_SCENARIO]))
+    ground_truth.append(
+        {
+            "alert_id": thin_id,
+            "scenario": THIN_DATA_SCENARIO,
+            "expected_verdict": "INSUFFICIENT_DATA",
+            "expected_mitre": [],
+            "is_benign": False,
+        }
+    )
+
+    unknown_id = f"ALERT_{thin_index + 1:03d}"
+    alerts.append(_unknown_alert(unknown_id))
+    ground_truth.append(
+        {
+            "alert_id": unknown_id,
+            "scenario": UNKNOWN_SCENARIO,
+            "expected_verdict": "INSUFFICIENT_DATA",
+            "expected_mitre": [],
+            "is_benign": False,
+        }
+    )
+    return alerts, ground_truth
 
 
 # --- Public API ------------------------------------------------------------
@@ -534,18 +789,23 @@ def generate_dataset(seed: int = DEFAULT_SEED) -> dict[str, list[dict]]:
     by_upn = {u["userPrincipalName"]: u for u in users}
 
     sign_ins = _baseline_signins(rng, users)
-    sign_ins.extend(_plant_scenario_signins(rng, by_upn))
+    scenario_sign_ins, evidence = _plant_scenario_signins(rng, by_upn)
+    sign_ins.extend(scenario_sign_ins)
+    thin_sign_ins, thin_evidence = _plant_thin_data_signins(rng, by_upn)
+    sign_ins.extend(thin_sign_ins)
+    evidence.update(thin_evidence)
 
     directory_audits = _baseline_audits(rng, users)
     directory_audits.extend(_plant_scenario_audits(rng, by_upn))
 
-    alerts = _generate_alerts(rng, sign_ins)
+    alerts, ground_truth = _generate_alerts(evidence)
 
     return {
         "users": users,
         "sign_ins": sign_ins,
         "directory_audits": directory_audits,
         "alerts": alerts,
+        "ground_truth": ground_truth,
     }
 
 

@@ -102,14 +102,17 @@ class FixtureStore:
             risk_state = "remediated"
         else:
             risk_state = "none"
-        types = sorted({t for e in events for t in e["riskEventTypes_v2"]})
+        user = self._users_by_upn.get(upn, {})
         return {
+            "id": user.get("id", ""),
+            "userDisplayName": user.get("displayName", upn),
             "userPrincipalName": upn,
             "riskLevel": worst["riskLevelAggregated"],
             "riskState": risk_state,
             "riskDetail": worst["riskDetail"],
-            "riskEventTypes_v2": types,
+            "riskLastUpdatedDateTime": worst["createdDateTime"],
             "isDeleted": False,
+            "isProcessing": False,
         }
 
 
