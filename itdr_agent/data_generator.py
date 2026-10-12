@@ -53,8 +53,10 @@ SCENARIO_UPNS: dict[str, str] = {
     "app_consent": f"dave.consent@{SYNTHETIC_DOMAIN}",
     "privilege_escalation": f"erin.admin@{SYNTHETIC_DOMAIN}",
     "benign_travel": f"frank.traveler@{SYNTHETIC_DOMAIN}",
-    # The investigated admin is the TARGET of the legitimate role add.
-    "benign_admin_role": ADMIN_UPNS[0],
+    # The investigated user is the TARGET of the legitimate role add. This is
+    # an ordinary helpdesk user, used by no other scenario, so it.admin (the
+    # privilege-escalation initiator) never appears in the benign window.
+    "benign_admin_role": f"helpdesk.agent@{SYNTHETIC_DOMAIN}",
     "benign_vpn": f"gina.vpn@{SYNTHETIC_DOMAIN}",
 }
 
@@ -667,11 +669,11 @@ def _plant_scenario_audits(
     audits.append(audit)
     assert erin["userPrincipalName"] in json.dumps(audit["targetResources"])
 
-    # Benign: a legitimate, ticket-backed role add. The investigated admin is
-    # the TARGET; another ADMIN_UPNS account is the initiator. The mapper still
-    # emits T1098.003 (the pattern is real); the Adjudicator weighs the ticket
-    # context and should return FALSE_POSITIVE.
-    target_admin = by_upn[SCENARIO_UPNS["benign_admin_role"]]
+    # Benign: a legitimate, ticket-backed role add. The investigated user is an
+    # ordinary helpdesk user (unique to this scenario) and the TARGET; an
+    # ADMIN_UPNS account is the initiator. The mapper still emits T1098.003
+    # (the pattern is real); the Adjudicator weighs the ticket context.
+    benign_target = by_upn[SCENARIO_UPNS["benign_admin_role"]]
     initiator = by_upn[ADMIN_UPNS[1]]
     audits.append(
         _audit(
@@ -687,10 +689,10 @@ def _plant_scenario_audits(
                     "type": "Role",
                 },
                 {
-                    "id": target_admin["id"],
-                    "displayName": target_admin["displayName"],
+                    "id": benign_target["id"],
+                    "displayName": benign_target["displayName"],
                     "type": "User",
-                    "userPrincipalName": target_admin["userPrincipalName"],
+                    "userPrincipalName": benign_target["userPrincipalName"],
                 },
             ],
             result_reason=(
