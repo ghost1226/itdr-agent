@@ -848,9 +848,9 @@ def test_scenario_users_are_not_noise_targets(dataset, scenario_upns):
     from itdr_agent import data_generator
 
     planted = {
-        "dave.consent@contoso.com": "Consent to application",
-        "erin.admin@contoso.com": "Add member to role",
-        "it.admin@contoso.com": "Add member to role",
+        scenario_upns["app_consent"]: "Consent to application",
+        scenario_upns["privilege_escalation"]: "Add member to role",
+        scenario_upns["benign_admin_role"]: "Add member to role",
     }
     for upn in set(scenario_upns.values()) | {data_generator.THIN_DATA_UPN}:
         for audit in dataset["directory_audits"]:
@@ -864,6 +864,73 @@ def test_scenario_users_are_not_noise_targets(dataset, scenario_upns):
                     f"noise audit targets scenario user {upn}: "
                     f"{audit['activityDisplayName']}"
                 )
+
+
+def _audit_target_upns(audit: dict) -> set[str]:
+    return {
+        t.get("userPrincipalName")
+        for t in audit["targetResources"]
+        if t.get("type") == "User"
+    }
+
+
+def test_benign_admin_role_target_is_an_ordinary_unique_user(scenario_upns):
+    from itdr_agent import data_generator
+
+    target = scenario_upns["benign_admin_role"]
+    assert target not in data_generator.ADMIN_UPNS, (
+        "benign role target must not be an admin used by other scenarios"
+    )
+    others = {
+        upn for scenario, upn in scenario_upns.items() if scenario != "benign_admin_role"
+    }
+    assert target not in others, "benign role target must be unique to its scenario"
+
+
+def test_no_cross_scenario_contamination(dataset, scenario_upns):
+    """No scenario user may be the initiator or target of another scenario's
+    planted audit inside their investigation window."""
+    planted = [
+        ("app_consent", "Consent to application", scenario_upns["app_consent"]),
+        (
+            "privilege_escalation",
+            "Add member to role",
+            scenario_upns["privilege_escalation"],
+        ),
+        (
+            "benign_admin_role",
+            "Add member to role",
+            scenario_upns["benign_admin_role"],
+        ),
+    ]
+    audit_scenario: dict[str, tuple[str, str]] = {}
+    for scenario, activity, target in planted:
+        match = next(
+            (
+                a
+                for a in dataset["directory_audits"]
+                if a["activityDisplayName"] == activity
+                and target in _audit_target_upns(a)
+            ),
+            None,
+        )
+        assert match is not None, f"missing planted audit for {scenario}"
+        audit_scenario[match["id"]] = (scenario, target)
+
+    for user_upn in scenario_upns.values():
+        for audit in dataset["directory_audits"]:
+            if audit["id"] not in audit_scenario:
+                continue
+            scenario, target = audit_scenario[audit["id"]]
+            if target == user_upn:
+                continue  # the user's own scenario
+            initiator = audit["initiatedBy"]["user"]["userPrincipalName"]
+            assert user_upn != initiator, (
+                f"{user_upn} initiates {scenario}'s planted audit"
+            )
+            assert user_upn not in _audit_target_upns(audit), (
+                f"{user_upn} is targeted by {scenario}'s planted audit"
+            )
 
 
 def test_benign_alerts_are_physically_plausible(
