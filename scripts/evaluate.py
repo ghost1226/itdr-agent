@@ -820,6 +820,10 @@ def write_results_md(
         "it is legitimate is the verdict's job.",
         "- Questions are always cancelled, so these numbers show the agent "
         "without analyst help.",
+        "- Check the model's `audit_notes` before quoting them: in the first "
+        "live run the model wrote \"Containment steps executed as per "
+        "playbook\", but the agent executes nothing; steps are recommendations "
+        "an analyst approves.",
         "",
     ]
     Path(path).write_text("\n".join(lines), encoding="utf-8")
@@ -894,7 +898,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Runs finished this session: {summary.completed_this_session}")
     print(f"Runs still pending: {summary.pending}")
     print(f"Requests used today (UTC): {summary.requests_today} of {args.daily_budget}")
-    print(f"Stopped: {summary.stopped_reason or 'all runs complete'}")
+    if summary.stopped_reason:
+        print(f"Stopped: {summary.stopped_reason}")
+    elif summary.pending:
+        print(f"This session's runs are done; {summary.pending} runs still pending.")
+    else:
+        print("All runs complete.")
     print(f"Results: {eval_dir / 'results.md'}")
     return 0
 

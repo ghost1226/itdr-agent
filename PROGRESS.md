@@ -183,9 +183,11 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 **Checkpoint 1b — complete ...; 106 tests). Checkpoint 4 task 8 — complete (`377d586`/`5dd360d`; 112 tests). Checkpoint 5 — complete (`a2ed3f5`/`cdac646`, then `2e6a950`/`221a907`, `01212d6`/`c6d7132`, `45ebedd`/`8e8912c`; 153 tests). Checkpoint 6 — complete (`efe5d05`/`b6d266d`; 165 tests).**
 
+**Eval model switched (Joe, 2026-10-12): `nvidia/nemotron-3-super-120b-a12b:free`.** `google/gemma-4-31b-it:free` returned 429 "temporarily rate-limited upstream" on both smoke attempts (2 requests spent; both logged in `eval/interruptions.jsonl`, no runs scored). Nemotron verified on the OpenRouter models API + page (HTTP 200): NVIDIA Nemotron 3 Super (free), 120B hybrid MoE (12B active), 262,144-token context, `0`/`0` pricing, supports `response_format`, `temperature`. Pass it with `--model nvidia/nemotron-3-super-120b-a12b:free` (or `EVAL_MODEL`); every scored run uses this one model. **Smoke test PASSED:** ALERT_001 run 1 → COMPROMISED, 0.92, `T1078.004`, 8 requests, 11,942/3,028 tokens, 53 s. Finding: its `audit_notes` said "Containment steps executed as per playbook" — false, the agent executes nothing (same overclaim as HW4); added to the results caveats.
+
 **Next: the live evaluation — only on Joe's go.** Joe's key is in `.env` (free tier, 50 requests/day; Joe chose to stay free, 2026-10-12).
-1. Smoke test first: `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
-2. Then `python scripts/evaluate.py --live` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
+1. ~~Smoke test first~~ DONE (passed on Nemotron): `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
+2. Then `python scripts/evaluate.py --live --model nvidia/nemotron-3-super-120b-a12b:free` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
 3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
 4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README.
 
