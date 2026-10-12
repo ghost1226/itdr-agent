@@ -55,6 +55,9 @@ from itdr_agent.human import ScriptedReviewer  # noqa: E402
 from itdr_agent.investigator import MAX_TOOL_CALLS, Investigator  # noqa: E402
 from itdr_agent.orchestrator import Orchestrator  # noqa: E402
 
+# Gemma 4 31B (free) was rate-limited upstream on 2026-10-12; Joe switched the
+# evaluation to Nemotron 3 Super (free), verified on OpenRouter the same day.
+EVAL_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 RUNS_PER_ALERT = 3
 DEFAULT_DAILY_BUDGET = 45  # OpenRouter free tier allows 50/day
 MAX_REQUESTS_PER_MINUTE = 20
@@ -841,7 +844,7 @@ def main(argv: list[str] | None = None) -> int:
                       help="real free model; spends daily requests")
     parser.add_argument("--runs", type=int, default=RUNS_PER_ALERT)
     parser.add_argument("--alerts", nargs="+")
-    parser.add_argument("--model", default=os.getenv("EVAL_MODEL", DEFAULT_MODEL))
+    parser.add_argument("--model", default=os.getenv("EVAL_MODEL", EVAL_DEFAULT_MODEL))
     parser.add_argument("--daily-budget", type=int, default=DEFAULT_DAILY_BUDGET)
     parser.add_argument("--eval-dir", default=str(PROJECT_ROOT / "eval"))
     args = parser.parse_args(argv)
