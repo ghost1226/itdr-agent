@@ -29,7 +29,7 @@ def make_dossier(**overrides):
         "device_trust": {"deviceId": "d1", "isManaged": True},
         "directory_audits": [],
         "risk_indicators": ["impossibleTravel"],
-        "mitre_attack_mapping": ["T1078"],
+        "mitre_attack_mapping": ["T1078.004"],
         "data_gaps": [],
     }
     base.update(overrides)
@@ -47,7 +47,7 @@ def make_report(**overrides):
             {"step": "Disable the account.", "rollback": "Re-enable after verification."}
         ],
         "recommended_actions": ["Force password reset."],
-        "mitre_techniques_observed": ["T1078"],
+        "mitre_techniques_observed": ["T1078.004"],
         "audit_notes": "",
     }
     base.update(overrides)
@@ -74,8 +74,8 @@ def test_dossier_requires_alert_id():
 
 
 def test_mitre_mapping_is_a_list_of_strings():
-    dossier = make_dossier(mitre_attack_mapping=["T1078", "T1621"])
-    assert dossier.mitre_attack_mapping == ["T1078", "T1621"]
+    dossier = make_dossier(mitre_attack_mapping=["T1078.004", "T1621"])
+    assert dossier.mitre_attack_mapping == ["T1078.004", "T1621"]
 
 
 def test_critical_gap_when_user_profile_missing():

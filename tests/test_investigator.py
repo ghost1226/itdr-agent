@@ -117,7 +117,7 @@ def test_investigator_returns_valid_dossier_for_planted_alert():
     assert dossier.user_profile is not None
     assert dossier.sign_in_history, "planted alert must have sign-ins"
     assert dossier.device_trust is not None
-    assert "T1078" in dossier.mitre_attack_mapping
+    assert "T1078.004" in dossier.mitre_attack_mapping
 
 
 def test_dossier_flags_missing_optional_data_not_critical():
@@ -352,13 +352,13 @@ def test_alert001_does_not_map_privilege_escalation():
     dossier = Investigator(ScriptedLLM(_full_script(ALICE))).investigate(
         _alert("impossible_travel")
     )
-    assert "T1078" in dossier.mitre_attack_mapping
+    assert "T1078.004" in dossier.mitre_attack_mapping
     assert "T1098.003" not in dossier.mitre_attack_mapping
     assert "T1098.003" not in dossier.mitre_attack_evidence
-    # T1078 evidence must point at real sign-in records.
+    # T1078.004 evidence must point at real sign-in records.
     fixture_ids = {e["id"] for e in get_store().sign_ins}
-    assert dossier.mitre_attack_evidence["T1078"]
-    assert set(dossier.mitre_attack_evidence["T1078"]) <= fixture_ids
+    assert dossier.mitre_attack_evidence["T1078.004"]
+    assert set(dossier.mitre_attack_evidence["T1078.004"]) <= fixture_ids
 
 
 def test_privilege_escalation_alert_maps_t1098_003_with_audit_evidence():
@@ -578,3 +578,273 @@ def test_investigator_user_message_is_the_wrapped_alert():
     assert content == build_alert_prompt(alert)
     for key in ANSWER_KEY:
         assert key not in content
+
+
+# --- Checkpoint 5: MITRE mapping skill alignment --------------------------
+
+_ALERT_TIME = datetime(2025, 1, 15, 9, tzinfo=timezone.utc)
+_IN_WINDOW = "2025-01-15T09:05:00Z"
+_OUTSIDE_WINDOW = "2025-01-01T00:00:00Z"
+
+
+def _signin_record(event_id, when, *, risk_event_types=None, mfa_failed=False):
+    return {
+        "id": event_id,
+        "createdDateTime": when,
+        "riskEventTypes_v2": risk_event_types or [],
+        "riskState": "none",
+        "status": {
+            "errorCode": 500121 if mfa_failed else 0,
+            "failureReason": (
+                "Authentication failed: MFA denied by user"
+                if mfa_failed
+                else ""
+            ),
+        },
+    }
+
+
+# T1078.004 — impossible travel
+
+
+def test_t1078_004_in_window_with_evidence():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record("s1", _IN_WINDOW, risk_event_types=["unlikelyTravel"])
+    indicators, mitre = derive_indicators(
+        _evidence(sign_ins=[event]), ALICE, _ALERT_TIME
+    )
+    assert mitre["T1078.004"] == ["s1"]
+    assert "unlikelyTravel" in indicators
+
+
+def test_t1078_004_outside_window_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record(
+        "s1", _OUTSIDE_WINDOW, risk_event_types=["unlikelyTravel"]
+    )
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert "T1078.004" not in mitre
+
+
+def test_t1078_004_without_risk_event_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record("s1", _IN_WINDOW)
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert "T1078.004" not in mitre
+
+
+def test_t1078_004_collects_all_in_window_evidence():
+    from itdr_agent.investigator import derive_indicators
+
+    events = [
+        _signin_record("s1", _IN_WINDOW, risk_event_types=["unlikelyTravel"]),
+        _signin_record(
+            "s2", "2025-01-15T09:25:00Z", risk_event_types=["unlikelyTravel"]
+        ),
+    ]
+    _, mitre = derive_indicators(_evidence(sign_ins=events), ALICE, _ALERT_TIME)
+    assert mitre["T1078.004"] == ["s1", "s2"]
+
+
+# T1090.003 — anonymized IP
+
+
+def test_t1090_003_in_window_with_evidence():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record(
+        "s1", _IN_WINDOW, risk_event_types=["anonymizedIPAddress"]
+    )
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert mitre["T1090.003"] == ["s1"]
+
+
+def test_t1090_003_outside_window_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record(
+        "s1", _OUTSIDE_WINDOW, risk_event_types=["anonymizedIPAddress"]
+    )
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert "T1090.003" not in mitre
+
+
+def test_t1090_003_benign_named_network_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record("s1", _IN_WINDOW)  # trusted VPN: no risky event
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert "T1090.003" not in mitre
+
+
+def test_t1090_003_other_risk_event_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    event = _signin_record("s1", _IN_WINDOW, risk_event_types=["unfamiliarFeatures"])
+    _, mitre = derive_indicators(_evidence(sign_ins=[event]), ALICE, _ALERT_TIME)
+    assert "T1090.003" not in mitre
+
+
+# T1621 — MFA fatigue (3+ denials in 30 minutes)
+
+
+def _mfa_denials(*pairs):
+    return [
+        _signin_record(event_id, when, mfa_failed=True)
+        for event_id, when in pairs
+    ]
+
+
+def test_t1621_three_denials_in_30_min_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    denials = _mfa_denials(
+        ("s1", "2025-01-15T09:00:00Z"),
+        ("s2", "2025-01-15T09:05:00Z"),
+        ("s3", "2025-01-15T09:10:00Z"),
+    )
+    indicators, mitre = derive_indicators(
+        _evidence(sign_ins=denials), ALICE, _ALERT_TIME
+    )
+    assert mitre["T1621"] == ["s1", "s2", "s3"]
+    assert "mfaFatigue" in indicators
+
+
+def test_t1621_denials_outside_window_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    denials = _mfa_denials(
+        ("s1", "2025-01-01T00:00:00Z"),
+        ("s2", "2025-01-01T00:05:00Z"),
+        ("s3", "2025-01-01T00:10:00Z"),
+    )
+    _, mitre = derive_indicators(_evidence(sign_ins=denials), ALICE, _ALERT_TIME)
+    assert "T1621" not in mitre
+
+
+def test_t1621_two_denials_below_threshold_indicator_only():
+    from itdr_agent.investigator import derive_indicators
+
+    denials = _mfa_denials(
+        ("s1", "2025-01-15T09:00:00Z"),
+        ("s2", "2025-01-15T09:05:00Z"),
+    )
+    indicators, mitre = derive_indicators(
+        _evidence(sign_ins=denials), ALICE, _ALERT_TIME
+    )
+    assert "T1621" not in mitre
+    assert "mfaFatigue" in indicators
+
+
+def test_t1621_denials_spread_beyond_30_min_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    denials = _mfa_denials(
+        ("s1", "2025-01-15T09:00:00Z"),
+        ("s2", "2025-01-15T10:00:00Z"),
+        ("s3", "2025-01-15T11:00:00Z"),
+    )
+    _, mitre = derive_indicators(_evidence(sign_ins=denials), ALICE, _ALERT_TIME)
+    assert "T1621" not in mitre
+
+
+# T1528 — consent after a risky sign-in
+
+
+def _consent_audit(when, initiator, audit_id="a1"):
+    return _audit(
+        "Consent to application",
+        when,
+        initiator,
+        [
+            {
+                "id": "u",
+                "displayName": "Dave",
+                "type": "User",
+                "userPrincipalName": initiator,
+            }
+        ],
+        audit_id=audit_id,
+    )
+
+
+def test_t1528_risky_signin_then_consent_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    signin = _signin_record(
+        "s1", "2025-01-15T09:00:00Z", risk_event_types=["unfamiliarFeatures"]
+    )
+    consent = _consent_audit("2025-01-15T09:10:00Z", DAVE)
+    _, mitre = derive_indicators(
+        _evidence(sign_ins=[signin], audits=[consent]), DAVE, _ALERT_TIME
+    )
+    assert mitre["T1528"] == ["a1"]
+
+
+def test_t1528_consent_outside_window_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    signin = _signin_record(
+        "s1", "2025-01-15T09:00:00Z", risk_event_types=["unfamiliarFeatures"]
+    )
+    consent = _consent_audit(_OUTSIDE_WINDOW, DAVE)
+    _, mitre = derive_indicators(
+        _evidence(sign_ins=[signin], audits=[consent]), DAVE, _ALERT_TIME
+    )
+    assert "T1528" not in mitre
+
+
+def test_t1528_consent_without_prior_risky_signin_indicator_only():
+    from itdr_agent.investigator import derive_indicators
+
+    consent = _consent_audit("2025-01-15T09:10:00Z", DAVE)
+    indicators, mitre = derive_indicators(
+        _evidence(audits=[consent]), DAVE, _ALERT_TIME
+    )
+    assert "T1528" not in mitre
+    assert "Consent to application" in indicators
+
+
+def test_t1528_consent_before_risky_signin_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    signin = _signin_record(
+        "s1", "2025-01-15T09:20:00Z", risk_event_types=["unfamiliarFeatures"]
+    )
+    consent = _consent_audit("2025-01-15T09:10:00Z", DAVE)
+    _, mitre = derive_indicators(
+        _evidence(sign_ins=[signin], audits=[consent]), DAVE, _ALERT_TIME
+    )
+    assert "T1528" not in mitre
+
+
+# T1098.003 — role escalation, below threshold
+
+
+def test_t1098_003_role_add_for_other_user_not_mapped():
+    from itdr_agent.investigator import derive_indicators
+
+    audit = _audit(
+        "Add member to role",
+        "2025-01-15T10:00:00Z",
+        "it.admin@contoso.com",
+        [
+            {
+                "id": "r",
+                "displayName": "Global Administrator",
+                "type": "Role",
+            },
+            {
+                "id": "u",
+                "displayName": "Other",
+                "type": "User",
+                "userPrincipalName": "other@contoso.com",
+            },
+        ],
+        audit_id="a1",
+    )
+    _, mitre = derive_indicators(_evidence(audits=[audit]), ALICE, _ALERT_TIME)
+    assert "T1098.003" not in mitre

@@ -142,9 +142,8 @@ VALID_VERDICTS = {"COMPROMISED", "SUSPICIOUS", "FALSE_POSITIVE", "INSUFFICIENT_D
 SYNTHETIC_DOMAIN = "contoso.com"
 
 # Five planted MITRE ATT&CK patterns and their expected technique IDs.
-# (Checkpoint 5 upgrades impossible_travel to T1078.004.)
 MITRE_EXPECTED = {
-    "impossible_travel": "T1078",
+    "impossible_travel": "T1078.004",
     "mfa_fatigue": "T1621",
     "anonymous_ip": "T1090.003",
     "app_consent": "T1528",
@@ -373,7 +372,7 @@ def test_impossible_travel_pattern(dataset, scenario_upns):
     from itdr_agent import data_generator
 
     scenario = "impossible_travel"
-    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1078"
+    assert data_generator.SCENARIO_TECHNIQUES[scenario] == "T1078.004"
     upn = scenario_upns[scenario]
     events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
     travel = [
