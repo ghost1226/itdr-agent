@@ -138,6 +138,7 @@ def test_end_to_end_returns_report_and_logs_run(tmp_path):
     assert result.report.containment_steps
     assert result.llm_called is True
     assert result.short_circuited is False
+    assert result.run_id
 
     entries = _audit(audit)
     run = next(e for e in entries if e["event"] == "run")
@@ -147,6 +148,28 @@ def test_end_to_end_returns_report_and_logs_run(tmp_path):
     assert run["dossier_hash"] == hashlib.sha256(
         result.dossier.model_dump_json().encode()
     ).hexdigest()
+    assert run["run_id"] == result.run_id
+
+
+def test_run_id_present_in_all_audit_entries(tmp_path):
+    orch, _llm, audit = _orchestrator(tmp_path, _dossier(), [_report()])
+    result = orch.run(
+        {"id": "ALERT_001", "userPrincipalName": ALICE},
+        run_id="test-run-001",
+    )
+    assert result.run_id == "test-run-001"
+    entries = _audit(audit)
+    for entry in entries:
+        assert entry.get("run_id") == "test-run-001"
+
+
+def test_run_id_auto_generated_when_not_provided(tmp_path):
+    orch, _llm, audit = _orchestrator(tmp_path, _dossier(), [_report()])
+    result = orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
+    assert result.run_id
+    assert result.run_id.startswith("ALERT_001")
+    entries = _audit(audit)
+    assert all(e.get("run_id") == result.run_id for e in entries)
 
 
 # --- Critical gap short-circuit -------------------------------------------
