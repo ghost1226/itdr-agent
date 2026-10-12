@@ -43,8 +43,11 @@ class ScriptedLLM:
 
 
 def _alert(scenario: str) -> dict:
+    from itdr_agent.data_generator import SCENARIO_UPNS
+
+    upn = SCENARIO_UPNS[scenario]
     for alert in get_store().alerts:
-        if alert["scenario"] == scenario:
+        if alert["userPrincipalName"] == upn:
             return alert
     raise KeyError(scenario)
 
@@ -421,6 +424,21 @@ def test_role_add_target_in_window_maps_t1098_003_with_id():
     )
     _, mitre = derive_indicators(_evidence(audits=[audit]), ALICE, alert_time)
     assert mitre["T1098.003"] == ["aud-target"]
+
+
+def test_risky_user_report_contributes_indicators():
+    from itdr_agent.investigator import derive_indicators
+
+    alert_time = datetime(2025, 1, 15, 9, tzinfo=timezone.utc)
+    evidence = _evidence()
+    evidence["risky_user_report"] = {
+        "riskLevel": "high",
+        "riskState": "atRisk",
+        "riskDetail": "adminConfirmedCompromise",
+    }
+    indicators, _ = derive_indicators(evidence, ALICE, alert_time)
+    assert "riskyUserAtRisk" in indicators
+    assert "riskyUserRiskLevel:high" in indicators
 
 
 def test_background_role_changes_are_initiated_by_admins():

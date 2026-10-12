@@ -1,14 +1,19 @@
-"""Checkpoint 1 — Synthetic data generator tests.
+"""Checkpoint 1 / 1b — Synthetic data generator tests.
 
 Red-green TDD: these tests define the contract for the synthetic
 Microsoft Entra ID dataset before the generator exists.
+
+Checkpoint 1b adds:
+  * three benign (false-positive) scenarios and one thin-data alert;
+  * a separate ground-truth file so labels never enter ``alerts.jsonl``;
+  * a field allowlist for alert records (graph-field-check).
 
 All data is synthetic. Nothing here touches real logs or tenants.
 
 Graph schema references (field names follow Microsoft's published shapes):
   * signIn resource (v1.0): riskEventTypes_v2, riskDetail,
     riskLevelAggregated, riskLevelDuringSignIn, status, deviceDetail,
-    location, clientAppUsed, conditionalAccessStatus.
+    signInLocation, clientAppUsed, conditionalAccessStatus.
     https://learn.microsoft.com/en-us/graph/api/resources/signin?view=graph-rest-1.0
   * mfaDetail is a beta signIn field.
     https://learn.microsoft.com/en-us/graph/api/resources/mfadetail?view=graph-rest-beta
@@ -99,6 +104,7 @@ USER_REQUIRED = {
     "accountEnabled": bool,
 }
 
+# Checkpoint 1b: alerts are Graph-shaped only. No scenario, no labels.
 ALERT_REQUIRED = {
     "id": str,
     "createdDateTime": str,
@@ -110,13 +116,25 @@ ALERT_REQUIRED = {
     "riskState": str,
     "riskEventTypes_v2": list,
     "status": dict,
-    "scenario": str,
 }
+
+ALERT_FORBIDDEN = {"scenario", "expected_verdict", "expected_mitre", "is_benign"}
+
+GROUND_TRUTH_REQUIRED = {
+    "alert_id": str,
+    "scenario": str,
+    "expected_verdict": str,
+    "expected_mitre": list,
+    "is_benign": bool,
+}
+
+VALID_VERDICTS = {"COMPROMISED", "SUSPICIOUS", "FALSE_POSITIVE", "INSUFFICIENT_DATA"}
 
 # Every user/email must live in the synthetic domain.
 SYNTHETIC_DOMAIN = "contoso.com"
 
 # Five planted MITRE ATT&CK patterns and their expected technique IDs.
+# (Checkpoint 5 upgrades impossible_travel to T1078.004.)
 MITRE_EXPECTED = {
     "impossible_travel": "T1078",
     "mfa_fatigue": "T1621",
@@ -125,7 +143,13 @@ MITRE_EXPECTED = {
     "privilege_escalation": "T1098.003",
 }
 
-ATTACK_PATTERNS = list(MITRE_EXPECTED)
+ATTACK_SCENARIOS = list(MITRE_EXPECTED)
+BENIGN_SCENARIOS = ["benign_travel", "benign_admin_role", "benign_vpn"]
+ALL_SCENARIOS = ATTACK_SCENARIOS + BENIGN_SCENARIOS
+ALERT_COUNT = 10
+
+BENIGN_TRAVEL_IP_1 = "203.0.113.50"
+BENIGN_TRAVEL_IP_2 = "203.0.113.51"
 
 
 def _assert_shape(record: dict, required: dict, label: str) -> None:
@@ -152,6 +176,24 @@ def scenario_upns():
     from itdr_agent import data_generator
 
     return data_generator.SCENARIO_UPNS
+
+
+@pytest.fixture(scope="module")
+def ground_truth_by_id(dataset):
+    return {entry["alert_id"]: entry for entry in dataset["ground_truth"]}
+
+
+@pytest.fixture(scope="module")
+def ground_truth_by_scenario(dataset):
+    return {entry["scenario"]: entry for entry in dataset["ground_truth"]}
+
+
+@pytest.fixture(scope="module")
+def alerts_by_scenario(dataset, ground_truth_by_id):
+    return {
+        ground_truth_by_id[alert["id"]]["scenario"]: alert
+        for alert in dataset["alerts"]
+    }
 
 
 # --- Users -----------------------------------------------------------------
@@ -268,7 +310,7 @@ def test_same_seed_is_byte_identical(tmp_path):
     second = tmp_path / "second"
     data_generator.write_fixtures(first, seed=42)
     data_generator.write_fixtures(second, seed=42)
-    for name in ("users", "sign_ins", "directory_audits", "alerts"):
+    for name in ("users", "sign_ins", "directory_audits", "alerts", "ground_truth"):
         a = (first / f"{name}.jsonl").read_bytes()
         b = (second / f"{name}.jsonl").read_bytes()
         assert a == b, f"{name}.jsonl differs between identical seeds"
@@ -289,16 +331,19 @@ def test_different_seeds_produce_different_bytes(tmp_path):
 # --- Planted MITRE ATT&CK patterns ----------------------------------------
 
 
-def test_all_five_scenarios_are_present(dataset, scenario_upns):
+def test_all_scenarios_are_present(dataset, scenario_upns):
     from itdr_agent import data_generator
 
-    assert set(scenario_upns) == set(MITRE_EXPECTED), "expected exactly five scenarios"
+    assert set(scenario_upns) == set(ALL_SCENARIOS), (
+        "expected five attack and three benign scenarios"
+    )
     known = {u["userPrincipalName"] for u in dataset["users"]}
     for scenario, upn in scenario_upns.items():
         assert upn in known, f"scenario user {upn} missing from users"
+    for scenario, technique in MITRE_EXPECTED.items():
         assert (
             data_generator.SCENARIO_TECHNIQUES[scenario]
-            == MITRE_EXPECTED[scenario]
+            == technique
         ), f"{scenario} maps to the wrong MITRE technique"
 
 
@@ -394,43 +439,208 @@ def test_privilege_escalation_pattern(dataset, scenario_upns):
     assert escalations, "expected a role-assignment escalation audit"
 
 
+# --- Checkpoint 1b: benign (false-positive) scenarios ---------------------
+
+
+def test_benign_travel_pattern(dataset, scenario_upns, alerts_by_scenario):
+    upn = scenario_upns["benign_travel"]
+    events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
+    travel = [
+        e
+        for e in events
+        if e["ipAddress"] in {BENIGN_TRAVEL_IP_1, BENIGN_TRAVEL_IP_2}
+    ]
+    assert len(travel) == 2, "expected two dedicated benign-travel sign-ins"
+    devices = {e["deviceDetail"]["deviceId"] for e in travel}
+    assert len(devices) == 1, "benign travel must use the same known device"
+    for event in travel:
+        assert event["deviceDetail"]["isCompliant"] is True
+        assert event["deviceDetail"]["isManaged"] is True
+        assert event["riskEventTypes_v2"] == []
+        assert event["riskState"] == "none"
+    assert (
+        travel[0]["location"]["countryOrRegion"]
+        != travel[1]["location"]["countryOrRegion"]
+    ), "benign travel is still travel across countries"
+    assert alerts_by_scenario["benign_travel"]["userPrincipalName"] == upn
+
+
+def test_benign_admin_role_pattern(dataset, scenario_upns, ground_truth_by_scenario):
+    from itdr_agent import data_generator
+
+    upn = scenario_upns["benign_admin_role"]
+    role_adds = [
+        a
+        for a in dataset["directory_audits"]
+        if a["activityDisplayName"] == "Add member to role"
+        and upn in json.dumps(a["targetResources"])
+    ]
+    assert role_adds, "expected the ticket-backed admin role add"
+    audit = role_adds[-1]
+    assert "HD-1042" in audit["resultReason"], "the expected role add cites its ticket"
+    initiator = audit["initiatedBy"]["user"]["userPrincipalName"]
+    assert initiator in data_generator.ADMIN_UPNS
+    assert initiator != upn, "the investigated user is the target, not the initiator"
+    assert ground_truth_by_scenario["benign_admin_role"]["expected_mitre"] == [
+        "T1098.003"
+    ]
+
+
+def test_benign_vpn_pattern(dataset, scenario_upns):
+    from itdr_agent import data_generator
+
+    upn = scenario_upns["benign_vpn"]
+    events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
+    vpn = [e for e in events if e["ipAddress"] in data_generator.KNOWN_VPN_EGRESS_IPS]
+    assert vpn, "expected sign-ins from the known company VPN egress"
+    for event in vpn:
+        assert event["deviceDetail"]["isCompliant"] is True
+        assert event["riskEventTypes_v2"] == []
+        assert event["riskState"] == "none"
+
+
+# --- Checkpoint 1b: thin-data and unknown alerts --------------------------
+
+
+def test_thin_data_alert_is_sparse_but_not_critical(
+    dataset, ground_truth_by_scenario
+):
+    from itdr_agent import data_generator
+    from itdr_agent.schemas import InvestigatorOutput
+
+    entry = ground_truth_by_scenario["thin_data"]
+    assert entry["expected_verdict"] == "INSUFFICIENT_DATA"
+    assert entry["expected_mitre"] == []
+
+    upn = data_generator.THIN_DATA_UPN
+    events = [e for e in dataset["sign_ins"] if e["userPrincipalName"] == upn]
+    assert 1 <= len(events) <= 2, "thin data is 1-2 sign-ins"
+
+    audits = [
+        a
+        for a in dataset["directory_audits"]
+        if upn in json.dumps(a.get("targetResources", []))
+        or a.get("initiatedBy", {}).get("user", {}).get("userPrincipalName") == upn
+    ]
+    assert audits == [], "thin-data user must have no directory audits"
+
+    profile = next(u for u in dataset["users"] if u["userPrincipalName"] == upn)
+    dossier = InvestigatorOutput(
+        alert_id=entry["alert_id"],
+        user_principal_name=upn,
+        user_profile=profile,
+        sign_in_history=events,
+    )
+    assert dossier.is_critical_gap is False
+
+    alert = next(a for a in dataset["alerts"] if a["id"] == entry["alert_id"])
+    assert alert["userPrincipalName"] == upn
+
+
+def test_unknown_alert_user_is_not_in_users(dataset, ground_truth_by_scenario):
+    from itdr_agent import data_generator
+
+    entry = ground_truth_by_scenario["unknown"]
+    assert entry["expected_verdict"] == "INSUFFICIENT_DATA"
+    assert entry["expected_mitre"] == []
+    alert = next(a for a in dataset["alerts"] if a["id"] == entry["alert_id"])
+    known = {u["userPrincipalName"] for u in dataset["users"]}
+    assert alert["userPrincipalName"] == data_generator.UNKNOWN_ALERT_UPN
+    assert alert["userPrincipalName"] not in known
+
+
+# --- Checkpoint 1b: ground truth is separate from the alert ----------------
+
+
+def test_alerts_carry_no_ground_truth(dataset):
+    from itdr_agent import data_generator
+
+    allow = set(data_generator.ALERT_FIELD_ALLOWLIST)
+    for alert in dataset["alerts"]:
+        assert ALERT_FORBIDDEN.isdisjoint(set(alert)), (
+            f"alert {alert['id']} leaked {ALERT_FORBIDDEN & set(alert)}"
+        )
+        assert set(alert) <= allow, (
+            f"alert {alert['id']} has non-allowlisted fields: {set(alert) - allow}"
+        )
+
+
+def test_ground_truth_shape_and_coverage(dataset):
+    gt = dataset["ground_truth"]
+    assert len(gt) == ALERT_COUNT
+    assert {entry["alert_id"] for entry in gt} == {a["id"] for a in dataset["alerts"]}
+    for entry in gt:
+        _assert_shape(entry, GROUND_TRUTH_REQUIRED, "ground_truth")
+        assert entry["expected_verdict"] in VALID_VERDICTS
+        assert all(
+            isinstance(t, str) and t.startswith("T")
+            for t in entry["expected_mitre"]
+        )
+
+
+def test_ground_truth_matches_scenario_maps(dataset):
+    from itdr_agent import data_generator
+
+    gt = {entry["scenario"]: entry for entry in dataset["ground_truth"]}
+    assert set(gt) == set(data_generator.SCENARIO_EXPECTED_VERDICT)
+    for scenario, verdict in data_generator.SCENARIO_EXPECTED_VERDICT.items():
+        assert gt[scenario]["expected_verdict"] == verdict
+        assert (
+            gt[scenario]["expected_mitre"]
+            == data_generator.SCENARIO_EXPECTED_MITRE[scenario]
+        )
+    for scenario, technique in data_generator.SCENARIO_TECHNIQUES.items():
+        assert gt[scenario]["expected_mitre"] == [technique]
+
+
+def test_ground_truth_benign_mitre_is_only_admin_role(dataset):
+    gt = {entry["scenario"]: entry for entry in dataset["ground_truth"]}
+    benign = {s for s, entry in gt.items() if entry["is_benign"]}
+    assert benign == set(BENIGN_SCENARIOS)
+    for scenario in ("benign_travel", "benign_vpn"):
+        assert gt[scenario]["expected_mitre"] == []
+    assert gt["benign_admin_role"]["expected_mitre"] == ["T1098.003"]
+    for scenario in ("thin_data", "unknown"):
+        assert gt[scenario]["expected_mitre"] == []
+        assert gt[scenario]["is_benign"] is False
+
+
 # --- Alerts ----------------------------------------------------------------
 
 
 def test_alerts_have_required_schema(dataset):
     alerts = dataset["alerts"]
-    assert len(alerts) == len(MITRE_EXPECTED)
+    assert len(alerts) == ALERT_COUNT
     ids = {a["id"] for a in alerts}
+    assert len(ids) == ALERT_COUNT
     assert "ALERT_001" in ids
     for alert in alerts:
         _assert_shape(alert, ALERT_REQUIRED, "alert")
-        assert alert["scenario"] in MITRE_EXPECTED
         _assert_shape(alert["location"], LOCATION_REQUIRED, "alert.location")
         _assert_shape(alert["status"], STATUS_REQUIRED, "alert.status")
 
 
-def test_alerts_reference_their_planted_evidence(dataset, scenario_upns):
+def test_alerts_reference_their_planted_evidence(dataset, alerts_by_scenario):
     """Each alert must point at a sign-in that actually shows its pattern.
 
     Alerts whose risk evidence is an MFA failure burst or a directory role
     change must still carry a matching signal, not a benign baseline sign-in.
     """
-    alerts = {a["scenario"]: a for a in dataset["alerts"]}
     risk_typed = {
         "impossible_travel": "unlikelyTravel",
         "anonymous_ip": "anonymizedIPAddress",
         "app_consent": "unfamiliarFeatures",
     }
     for scenario, expected in risk_typed.items():
-        assert expected in alerts[scenario]["riskEventTypes_v2"], (
+        assert expected in alerts_by_scenario[scenario]["riskEventTypes_v2"], (
             f"{scenario} alert does not carry {expected}"
         )
-    fatigue = alerts["mfa_fatigue"]
+    fatigue = alerts_by_scenario["mfa_fatigue"]
     assert "MFA" in fatigue["status"]["failureReason"], (
         "mfa_fatigue alert must reference an MFA-denied sign-in"
     )
     assert fatigue["status"]["errorCode"] != 0
-    assert alerts["privilege_escalation"]["riskState"] == "atRisk", (
+    assert alerts_by_scenario["privilege_escalation"]["riskState"] == "atRisk", (
         "privilege_escalation alert must be flagged risky"
     )
 
@@ -442,7 +652,7 @@ def test_write_fixtures_creates_jsonl(tmp_path):
     from itdr_agent import data_generator
 
     data_generator.write_fixtures(tmp_path, seed=1337)
-    for name in ("users", "sign_ins", "directory_audits", "alerts"):
+    for name in ("users", "sign_ins", "directory_audits", "alerts", "ground_truth"):
         path = tmp_path / f"{name}.jsonl"
         assert path.exists(), f"missing fixture {path}"
         lines = [
@@ -451,5 +661,17 @@ def test_write_fixtures_creates_jsonl(tmp_path):
             if line.strip()
         ]
         assert lines, f"fixture {path} is empty"
-        for record in lines:
-            assert "id" in record
+
+    for record in [
+        json.loads(line)
+        for line in (tmp_path / "alerts.jsonl").read_text().splitlines()
+        if line.strip()
+    ]:
+        assert "id" in record
+
+    for record in [
+        json.loads(line)
+        for line in (tmp_path / "ground_truth.jsonl").read_text().splitlines()
+        if line.strip()
+    ]:
+        assert "alert_id" in record

@@ -69,10 +69,15 @@ AUDIT_FIELDS = {
 }
 
 RISK_FIELDS = {
+    "id",
+    "userDisplayName",
     "userPrincipalName",
     "riskLevel",
     "riskState",
-    "riskEventTypes_v2",
+    "riskDetail",
+    "riskLastUpdatedDateTime",
+    "isDeleted",
+    "isProcessing",
 }
 
 
@@ -186,7 +191,9 @@ def test_risky_user_report_known_user():
     assert RISK_FIELDS <= set(report)
     assert report["userPrincipalName"] == KNOWN_UPN
     assert report["riskLevel"] in {"low", "medium", "high"}
-    assert "unlikelyTravel" in report["riskEventTypes_v2"]
+    assert report["riskState"] == "atRisk"
+    # riskEventTypes_v2 belongs to signIn, not riskyUser (graph-field-check).
+    assert "riskEventTypes_v2" not in report
 
 
 def test_risky_user_report_unknown_returns_none():
