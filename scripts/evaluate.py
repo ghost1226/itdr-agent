@@ -46,7 +46,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from itdr_agent import config  # noqa: E402
 from itdr_agent.adjudicator import (  # noqa: E402
-    DEFAULT_MODEL,
     Adjudicator,
     AdjudicatorParseError,
     UnsupportedMitreClaimError,
