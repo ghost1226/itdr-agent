@@ -275,7 +275,14 @@ def make_offline_runner(ground_truth: dict[str, dict], audit_log: Path):
 
 
 def classify_error(exc: BaseException) -> tuple[str, str]:
-    """Return (kind, action). action: record | pending | fatal."""
+    """Return (kind, action).
+
+    record  — the run is finished and scored as failed (the model's fault);
+    skip    — infrastructure hiccup: log it, leave the run pending, continue;
+    pending — rate limit or budget: log it, leave the run pending, stop;
+    fatal   — configuration problem (auth, credits, model id, request
+              format): stop before more requests are wasted.
+    """
     if isinstance(exc, BudgetExhausted):
         return "daily_budget", "pending"
     if isinstance(exc, UnsupportedMitreClaimError):
@@ -287,6 +294,8 @@ def classify_error(exc: BaseException) -> tuple[str, str]:
 
         if isinstance(exc, openai.APITimeoutError):
             return "timeout", "record"
+        if isinstance(exc, openai.APIConnectionError):
+            return "connection_error", "skip"
     except ImportError:  # pragma: no cover
         pass
     if isinstance(exc, TimeoutError):
@@ -294,8 +303,10 @@ def classify_error(exc: BaseException) -> tuple[str, str]:
     status = getattr(exc, "status_code", None)
     if status == 429:
         return "rate_limited", "pending"
-    if status in (401, 402, 403):
+    if status in (400, 401, 402, 403, 404):
         return f"fatal:{status}", "fatal"
+    if status is not None and status >= 500:
+        return f"api_error:{status}", "skip"
     if status is not None:
         return f"api_error:{status}", "record"
     return f"error:{type(exc).__name__}", "record"
@@ -349,7 +360,10 @@ def run_evaluation(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     dry_run: bool = False,
+    only: set[str] | None = None,
 ) -> SessionSummary:
+    """Run pending (alert, run) pairs; ``only`` limits this session to some
+    alert ids while results and the pending count still cover every alert."""
     eval_dir = Path(eval_dir)
     eval_dir.mkdir(parents=True, exist_ok=True)
     raw_path = eval_dir / "raw.jsonl"
@@ -369,9 +383,11 @@ def run_evaluation(
     todo = [
         (alert, n)
         for alert in alerts
+        if only is None or alert["id"] in only
         for n in range(1, runs_per_alert + 1)
         if (alert["id"], n) not in done
     ]
+    planned_runs = max(runs_per_alert, RUNS_PER_ALERT)
 
     completed = 0
     stopped: str | None = None
@@ -423,6 +439,8 @@ def run_evaluation(
                     {**base, **usage, "error": kind, "error_detail": _clip(exc),
                      "timestamp": datetime.now(timezone.utc).isoformat()},
                 )
+                if action == "skip":
+                    continue
                 stopped = kind
                 break
             report = result.report
@@ -459,9 +477,9 @@ def run_evaluation(
         eval_dir / "results.md",
         records,
         interruptions,
-        {k: v for k, v in ground_truth.items() if k in in_scope} or ground_truth,
+        {k: v for k, v in ground_truth.items() if k in in_scope},
         model=model,
-        runs_per_alert=runs_per_alert,
+        runs_per_alert=planned_runs,
         daily_budget=daily_budget,
         dry_run=dry_run,
     )
@@ -469,7 +487,7 @@ def run_evaluation(
     pending = sum(
         1
         for alert in alerts
-        for n in range(1, runs_per_alert + 1)
+        for n in range(1, planned_runs + 1)
         if (alert["id"], n) not in finished
     )
     return SessionSummary(completed, pending, stopped, budget.used_today)
@@ -827,12 +845,12 @@ def main(argv: list[str] | None = None) -> int:
     eval_dir = Path(args.eval_dir)
     alerts = load_alerts(FIXTURES / "alerts.jsonl")
     ground_truth = load_ground_truth(FIXTURES / "ground_truth.jsonl")
-    if args.alerts:
-        unknown = sorted(set(args.alerts) - {a["id"] for a in alerts})
+    only = set(args.alerts) if args.alerts else None
+    if only:
+        unknown = sorted(only - {a["id"] for a in alerts})
         if unknown:
             print(f"Unknown alert ids: {unknown}")
             return 2
-        alerts = [a for a in alerts if a["id"] in args.alerts]
 
     if args.dry_run:
         dry_dir = eval_dir / "dry_run"
@@ -842,11 +860,11 @@ def main(argv: list[str] | None = None) -> int:
             alerts, ground_truth,
             make_offline_runner(ground_truth, dry_dir / "audit.jsonl"),
             runs_per_alert=args.runs, eval_dir=dry_dir, model="offline-dry-run",
-            daily_budget=10**9, sleep=lambda _s: None, dry_run=True,
+            daily_budget=10**9, sleep=lambda _s: None, dry_run=True, only=only,
         )
         per_run = [r["llm_requests"] for r in _read_jsonl(dry_dir / "raw.jsonl")]
         total = sum(per_run)
-        print(f"Alerts: {len(alerts)}  Runs per alert: {args.runs}  "
+        print(f"Alerts: {len(only) if only else len(alerts)}  Runs per alert: {args.runs}  "
               f"Runs: {len(per_run)}")
         print(f"Requests per run (offline script): min {min(per_run)}, "
               f"mean {total / len(per_run):.1f}, max {max(per_run)}")
@@ -871,7 +889,7 @@ def main(argv: list[str] | None = None) -> int:
         make_live_runner(config.OPENROUTER_API_KEY, args.model, timeout,
                          eval_dir / "audit.jsonl"),
         runs_per_alert=args.runs, eval_dir=eval_dir, model=args.model,
-        daily_budget=args.daily_budget,
+        daily_budget=args.daily_budget, only=only,
     )
     print(f"Runs finished this session: {summary.completed_this_session}")
     print(f"Runs still pending: {summary.pending}")
