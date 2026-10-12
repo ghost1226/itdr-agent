@@ -73,6 +73,13 @@ Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), befor
   - Baseline audits are initiated only by `ADMIN_UPNS` and never target scenario users (the only non-admin initiator left is dave's self-consent).
   - New test `test_benign_alerts_are_physically_plausible`: whole investigation window on known devices, no consecutive leg > 900 km/h, no non-admin action on the user.
   - Same seed ⇒ byte-identical for all six files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
+- ✅ Checkpoint 1b fix 2 (Jessica): benign target is no longer shared with the privilege-escalation attack.
+  - **Red:** `72418ed` — tests only; `pytest` → **2 failed, 104 passed** (106 tests). The failure named the overlap exactly: `it.admin@contoso.com initiates privilege_escalation's planted audit`.
+  - **Green:** `0438e4c` — **106 passed**; fixtures regenerated (users 30, sign-ins 133, audits 53, alerts 10, ground_truth 10, user_context 30).
+  - `benign_admin_role` now investigates a new ordinary user, `helpdesk.agent@contoso.com`, who is in no other scenario and is not in `ADMIN_UPNS`. The role add is initiated by `sec.admin` and cites ticket `HD-1042`; `expected_mitre` stays `["T1098.003"]`.
+  - `it.admin` remains only the privilege-escalation initiator, so it no longer appears in any benign user's window.
+  - New tests: `test_benign_admin_role_target_is_an_ordinary_unique_user` and `test_no_cross_scenario_contamination` (no scenario user is initiator or target of another scenario's planted audit).
+  - Same seed ⇒ byte-identical for all six files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
 
 ## Microsoft Graph Schema Sources
 
@@ -117,7 +124,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Checkpoint 1b — complete (red `d49281d`, green `3e70589`, then review fix red `18a74d0`, green `49edfdc`; 104 tests).**
+**Checkpoint 1b — complete (red `d49281d`, green `3e70589`; review fix red `18a74d0`, green `49edfdc`; overlap fix red `72418ed`, green `0438e4c`; 106 tests).**
 
 **Next (per Joe): Checkpoint 4 task 8, before Checkpoint 5** — the alert
 allowlist + untrusted-data wrapper + no-answer-key test, as its own red/green
@@ -241,3 +248,5 @@ Standing prevention rules distilled from the above:
 - `3e70589` — checkpoint-1b: green — benign/thin/unknown alerts, ground-truth split, field allowlist, riskyUser fix
 - `18a74d0` — checkpoint-1b-fix: red — home-city/known-device/IP baseline, real-flight travel, named-network VPN, admin-only audits, benign plausibility
 - `49edfdc` — checkpoint-1b-fix: green — home-city/known-device/IP baseline, real-flight travel, named-network VPN, admin-only audits
+- `72418ed` — checkpoint-1b-fix2: red — benign role target must be unique; no cross-scenario contamination
+- `0438e4c` — checkpoint-1b-fix2: green — unique ordinary helpdesk target for benign role add
