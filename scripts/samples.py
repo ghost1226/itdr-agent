@@ -16,6 +16,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -170,15 +171,21 @@ def _vpn_note(dossier) -> str:
     return "sign-ins from a trusted named corporate network"
 
 
-def _role_note(dossier) -> str:
+def _role_note(dossier, *, benign: bool) -> str:
     for audit in dossier.directory_audits:
         if audit.get("activityDisplayName") != "Add member to role":
             continue
         for target in audit.get("targetResources", []):
-            if target.get("userPrincipalName") == dossier.user_principal_name:
-                reason = audit.get("resultReason") or "an expected role add"
-                return f"the expected role add ({reason.strip().rstrip('.')})"
-    return "an expected, ticket-backed role add targeting this user"
+            if target.get("userPrincipalName") != dossier.user_principal_name:
+                continue
+            reason = (audit.get("resultReason") or "an in-window role add")
+            reason = reason.strip().rstrip(".")
+            # Only call a role add "expected" for a benign verdict whose audit
+            # actually cites a ticket; an attack role add is not expected.
+            if benign and re.search(r"HD-\d+", reason):
+                return f"the expected role add ({reason})"
+            return f"an in-window role add ({reason})"
+    return "an in-window role add targeting this user"
 
 
 def _insufficient_note(dossier) -> str:
@@ -193,7 +200,7 @@ def _attack_note(dossier) -> str:
         if technique == "T1078.004":
             notes.append(_travel_note(dossier))
         elif technique == "T1098.003":
-            notes.append(_role_note(dossier))
+            notes.append(_role_note(dossier, benign=False))
         else:
             notes.append(TECHNIQUE_NOTES.get(technique, technique))
     cleaned = [note.strip().rstrip(".") for note in notes]
@@ -202,7 +209,7 @@ def _attack_note(dossier) -> str:
 
 def _benign_note(dossier, scenario: str) -> str:
     if scenario == "benign_admin_role":
-        return _role_note(dossier)
+        return _role_note(dossier, benign=True)
     if scenario == "benign_vpn":
         return _vpn_note(dossier)
     if scenario == "benign_travel":
@@ -219,16 +226,11 @@ def build_mock_report(dossier, scenario: str, verdict: str) -> str:
             f"Benign: {_benign_note(dossier, scenario)}. "
             "No containment required; continue monitoring the account."
         )
-        containment_steps = [
-            {
-                "step": "No containment required; continue monitoring",
-                "rollback": (
-                    "If new risky activity appears, escalate to the on-call "
-                    "analyst."
-                ),
-            }
+        containment_steps = []
+        recommended_actions = [
+            "Continue monitoring the account",
+            "Confirm the activity with the user out-of-band",
         ]
-        recommended_actions = ["Confirm the activity with the user out-of-band"]
         confidence = 0.88
     elif verdict == "INSUFFICIENT_DATA":
         narrative = (
