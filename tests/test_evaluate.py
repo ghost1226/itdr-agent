@@ -537,3 +537,63 @@ def test_live_run_requires_explicit_flag_and_key(tmp_path, monkeypatch, capsys):
     assert evaluate.main(["--eval-dir", str(tmp_path)]) == 2
     assert evaluate.main(["--live", "--eval-dir", str(tmp_path)]) == 2
     assert "OPENROUTER_API_KEY" in capsys.readouterr().out
+
+
+# --- live wiring (fake OpenAI client, no network) ----------------------------
+
+
+class _FakeCompletions:
+    """Scripted OpenAI-style client: tool turns, then an Adjudicator reply."""
+
+    def __init__(self, contents: list[str]) -> None:
+        self.contents = list(contents)
+        self.kwargs: list[dict] = []
+
+    def create(self, **kwargs):
+        self.kwargs.append(kwargs)
+        message = SimpleNamespace(content=self.contents.pop(0))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message)],
+            usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=50),
+        )
+
+
+def test_live_runner_drives_real_orchestrator_and_counts_every_request(
+    tmp_path, monkeypatch
+):
+    alert = next(a for a in _alerts() if a["id"] == "ALERT_001")
+    upn = alert["userPrincipalName"]
+    report = {
+        "verdict": "COMPROMISED",
+        "confidence": 0.9,
+        "narrative": "Unlikely travel from New York to Moscow.",
+        "containment_steps": [{"step": "Disable the account", "rollback": "Re-enable it"}],
+        "recommended_actions": [],
+        "mitre_techniques_observed": ["T1078.004"],
+        "audit_notes": "",
+    }
+    completions = _FakeCompletions(
+        [
+            json.dumps({"action": "tool", "tool": "get_user_profile", "arguments": {"upn": upn}}),
+            json.dumps({"action": "tool", "tool": "get_sign_in_history", "arguments": {"upn": upn, "hours": 10000}}),
+            json.dumps({"action": "final"}),
+            json.dumps(report),
+        ]
+    )
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    monkeypatch.setattr(evaluate, "make_openrouter_client", lambda key, timeout: client)
+
+    runner = evaluate.make_live_runner("sk-or-v1-test", MODEL, 30, tmp_path / "audit.jsonl")
+    _run(tmp_path, runner, alerts=[alert], runs=1)
+
+    record = _records(tmp_path)[0]
+    assert record["verdict"] == "COMPROMISED"
+    assert record["mitre_techniques_observed"] == ["T1078.004"]
+    assert "T1078.004" in record["dossier_mitre"]
+    assert record["llm_requests"] == 4  # 3 Investigator turns + 1 Adjudicator
+    assert record["tokens_in"] == 4000 and record["tokens_out"] == 200
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["requests_today"] == 4
+    assert all(k["model"] == MODEL and k["temperature"] == 0 for k in completions.kwargs)
+    audit = [json.loads(l) for l in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert audit and all(e["run_id"] == record["run_id"] for e in audit)

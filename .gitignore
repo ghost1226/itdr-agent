@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 logs/
+
+# Evaluation scratch (results.md, raw.jsonl, interruptions.jsonl are committed)
+eval/dry_run/
+eval/state.json
+eval/audit.jsonl
