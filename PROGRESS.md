@@ -74,8 +74,15 @@ Updated: Checkpoint 5 complete; next Checkpoint 6 (orchestration + HITL).
   - **Red:** `2e6a950` — tests only; `pytest` → **5 failed, 141 passed** (146 tests).
   - **Green:** `221a907` — **146 passed**.
   - Adjudicator prompt now says `mitre_techniques_observed` lists **every** evidence-backed technique pattern, **even when the verdict is FALSE_POSITIVE** (explain the benign reason in the narrative), and shows `T#### or T####.###`, instructing the model to use the **exact IDs** from `mitre_attack_evidence` (sub-technique example `T1078.004`).
-  - New `itdr_agent/samples.py` builds deterministic, offline mocked sample reports whose narrative is composed from the real dossier, so it cannot invent evidence (`python -m itdr_agent.samples ALERT_001 ALERT_007`).
+  - New `itdr_agent/samples.py` (later moved to `scripts/samples.py` in fix 2) builds deterministic, offline mocked sample reports whose narrative is composed from the real dossier, so it cannot invent evidence.
   - New `tests/test_mitre_ids.py` guard: no bare `T1078` in `itdr_agent/` or `scripts/`; fixed the stale `(T1078)` comment in `data_generator.py`.
+- ✅ Checkpoint 5 fix 2 (Jessica): samples moved to scripts, evidence-derived, verdict-specific.
+  - **Red:** `01212d6` — tests only; `pytest` → **6 failed, 144 passed** (150 tests).
+  - **Green:** `c6d7132` — **150 passed**.
+  - `itdr_agent/samples.py` deleted; `scripts/samples.py` reads `ground_truth.jsonl` (scripts/tests only). New test asserts nothing under `itdr_agent/` references ground truth (`data_generator.py` is the producer).
+  - Each benign narrative comes from that alert's own evidence: travel = same known device + the real NY→London 8.2 h leg; role add = the `HD-1042` ticket in `resultReason`; VPN = the trusted named network `Contoso Corporate VPN`.
+  - Verdict-specific output: `FALSE_POSITIVE` → "no containment required; continue monitoring"; `INSUFFICIENT_DATA` → no containment steps and recommends gathering sign-ins/audits then re-adjudicating; only compromised/suspicious keep the account-disable step.
+  - New tests cover all 10 alerts: every claimed technique must be in that alert's `mitre_attack_evidence`, and benign/insufficient samples never contain "disable".
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -295,3 +302,5 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 - `cdac646` — checkpoint-5: green — Adjudicator, T1078.004, T1621 30-min burst, T1528 prior risky sign-in, MITRE guard
 - `2e6a950` — checkpoint-5-fix: red — prompt FALSE_POSITIVE/sub-technique guidance, faithful sample mocks, no bare T1078
 - `221a907` — checkpoint-5-fix: green — prompt guidance, faithful sample mocks, T1078.004 comment
+- `01212d6` — checkpoint-5-fix2: red — move samples to scripts, no ground truth in package, verdict-specific containment, all 10 alerts
+- `c6d7132` — checkpoint-5-fix2: green — samples under scripts, evidence-derived benign narratives, verdict-specific containment
