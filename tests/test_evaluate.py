@@ -646,3 +646,92 @@ def test_subset_run_reports_against_the_full_plan(tmp_path):
     assert len(_records(tmp_path)) == 1
     assert summary.pending == 29
     assert "1 of 30" in (tmp_path / "results.md").read_text()
+
+
+# --- splitting the evaluation between two people -----------------------------
+
+
+def _main_live(monkeypatch, tmp_path, argv, runner=None):
+    monkeypatch.setattr(evaluate.config, "OPENROUTER_API_KEY", "sk-or-v1-test")
+    monkeypatch.setattr(evaluate, "REQUEST_SPACING_SECONDS", 0)
+    monkeypatch.setattr(
+        evaluate, "make_live_runner", lambda *a, **k: runner or _truth_runner()
+    )
+    return evaluate.main(["--live", "--model", MODEL, "--eval-dir", str(tmp_path), *argv])
+
+
+def test_live_run_on_some_alerts_reports_progress_for_those_alerts(
+    tmp_path, monkeypatch, capsys
+):
+    code = _main_live(monkeypatch, tmp_path, ["--alerts", "ALERT_004", "ALERT_005"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Your alerts: 6 of 6 runs done" in out
+    assert "All runs for your alerts are complete." in out
+
+
+def test_live_run_progress_line_counts_partial_work(tmp_path, monkeypatch, capsys):
+    code = _main_live(
+        monkeypatch, tmp_path,
+        ["--alerts", "ALERT_004", "ALERT_005", "--daily-budget", "25"],
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Your alerts: 3 of 6 runs done" in out  # 7/run; starts at 0, 7, 14 (10 reserved)
+    assert "complete" not in out.split("Your alerts:")[1].splitlines()[0]
+
+
+def _two_halves(tmp_path):
+    alerts = _alerts()
+    a_dir, b_dir = tmp_path / "joe", tmp_path / "partner"
+    for directory, half in ((a_dir, alerts[:5]), (b_dir, alerts[5:])):
+        evaluate.run_evaluation(
+            alerts, _gt(), _truth_runner(),
+            runs_per_alert=3, eval_dir=directory, model=MODEL, daily_budget=10_000,
+            today=lambda: DAY_1, clock=FakeClock().clock, sleep=lambda s: None,
+            only={a["id"] for a in half},
+        )
+    return a_dir, b_dir
+
+
+def test_combine_merges_both_halves_into_one_report(tmp_path, capsys):
+    a_dir, b_dir = _two_halves(tmp_path)
+    out_dir = tmp_path / "final"
+    code = evaluate.main(
+        ["--combine", str(a_dir), str(b_dir), "--eval-dir", str(out_dir), "--model", MODEL]
+    )
+    assert code == 0
+    records = _records(out_dir)
+    assert len(records) == 30
+    assert {r["source"] for r in records} == {"joe", "partner"}
+    results = (out_dir / "results.md").read_text()
+    assert "PARTIAL" not in results
+    assert "joe: 15 runs" in results and "partner: 15 runs" in results
+    # sources are untouched
+    assert len(_records(a_dir)) == 15 and len(_records(b_dir)) == 15
+
+
+def test_combine_refuses_the_same_run_from_two_people(tmp_path, capsys):
+    a_dir, b_dir = _two_halves(tmp_path)
+    dup = _records(a_dir)[0]
+    with (b_dir / "raw.jsonl").open("a") as handle:
+        handle.write(json.dumps(dup) + "\n")
+    code = evaluate.main(
+        ["--combine", str(a_dir), str(b_dir), "--eval-dir", str(tmp_path / "final"), "--model", MODEL]
+    )
+    assert code == 2
+    assert "duplicate" in capsys.readouterr().out.lower()
+    assert not (tmp_path / "final" / "raw.jsonl").exists()
+
+
+def test_combine_only_keeps_the_chosen_model(tmp_path):
+    a_dir, b_dir = _two_halves(tmp_path)
+    other = dict(_records(a_dir)[0], model="other/model:free", alert_id="ALERT_010", run=9)
+    with (a_dir / "raw.jsonl").open("a") as handle:
+        handle.write(json.dumps(other) + "\n")
+    code = evaluate.main(
+        ["--combine", str(a_dir), str(b_dir), "--eval-dir", str(tmp_path / "final"), "--model", MODEL]
+    )
+    assert code == 0
+    assert all(r["model"] == MODEL for r in _records(tmp_path / "final"))
+    assert len(_records(tmp_path / "final")) == 30
