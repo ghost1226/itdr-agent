@@ -55,6 +55,12 @@ Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), befor
   - MITRE derivation is now direction- and time-aware, and every technique carries its evidence ids (`mitre_attack_evidence`).
   - Tool-data wrapper escapes `<`/`>` (`\u003c`/`\u003e`) so a record cannot close the data block.
   - Background role changes are initiated only by `ADMIN_UPNS`; scenario users are never baseline role-add targets.
+- ✅ Checkpoint 4 task 8: alert allowlist + untrusted-data wrapper (review requirement).
+  - **Red:** `377d586` — tests only; `pytest` → **6 failed, 106 passed** (112 tests).
+  - **Green:** `5dd360d` — **112 passed**.
+  - `investigator.build_alert_prompt()` filters the alert through `ALERT_FIELD_ALLOWLIST` and wraps it as `<microsoft_graph_data tool="alert" untrusted="true">` with `<`/`>` escaped, so the model sees evidence and never the answer key.
+  - System prompt now says the alert **and** tool output are untrusted data.
+  - Tests: no answer key in any alert prompt, alert fields only inside the wrapper, breakout probe, instruction probe, round-trip `json.loads`, and the investigator's user message equals the wrapped alert.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -124,14 +130,9 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Checkpoint 1b — complete (red `d49281d`, green `3e70589`; review fix red `18a74d0`, green `49edfdc`; overlap fix red `72418ed`, green `0438e4c`; 106 tests).**
+**Checkpoint 1b — complete (red `d49281d`, green `3e70589`; review fix red `18a74d0`, green `49edfdc`; overlap fix red `72418ed`, green `0438e4c`; 106 tests). Checkpoint 4 task 8 — complete (red `377d586`, green `5dd360d`; 112 tests).**
 
-**Next (per Joe): Checkpoint 4 task 8, before Checkpoint 5** — the alert
-allowlist + untrusted-data wrapper + no-answer-key test, as its own red/green
-pair. Checkpoint 4 is otherwise done; this closes the gap where the whole alert
-record (including `scenario`) was sent to the model unwrapped.
-
-After that, Checkpoint 5 — Adjudicator agent (structured reasoning):
+**Next: Checkpoint 5 — Adjudicator agent (structured reasoning):**
 1. Verify a free OpenRouter model exists and document it (open item).
 2. Write failing `tests/test_adjudicator.py` (red commit first).
 3. Build `itdr_agent/adjudicator.py`: single-shot structured output over the dossier.
@@ -212,6 +213,7 @@ Standing prevention rules distilled from the above:
 | graph-field-check allowlist test per resource | Catches invented/renamed fields; it caught `riskyUser.riskEventTypes_v2`. |
 | `user_context.jsonl` (home city, known devices, stable IPs) | Realistic baseline noise; lets tests prove benign cases are physically plausible without putting project fields in Graph records. |
 | `benign_vpn` uses beta `networkLocationDetails` | The agent cannot know `198.51.100.x` is the company VPN from the IP alone; a trusted named network is the Graph-native explanation. |
+| Alert is allowlisted + wrapped like tool output | The full alert record (including `scenario`) must never reach the model; `build_alert_prompt` applies `ALERT_FIELD_ALLOWLIST` and the untrusted-data wrapper. |
 
 ## Open Problems
 
@@ -250,3 +252,5 @@ Standing prevention rules distilled from the above:
 - `49edfdc` — checkpoint-1b-fix: green — home-city/known-device/IP baseline, real-flight travel, named-network VPN, admin-only audits
 - `72418ed` — checkpoint-1b-fix2: red — benign role target must be unique; no cross-scenario contamination
 - `0438e4c` — checkpoint-1b-fix2: green — unique ordinary helpdesk target for benign role add
+- `377d586` — checkpoint-4-task8: red — alert allowlist + untrusted-data wrapper tests
+- `5dd360d` — checkpoint-4-task8: green — allowlist + untrusted-data wrapper for the alert
