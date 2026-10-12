@@ -221,3 +221,21 @@ def test_adjudicator_prompt_instructs_untrusted_and_json_only():
     assert "untrusted" in system.lower()
     assert "json" in system.lower()
     assert "rollback" in system.lower()
+
+
+def test_system_prompt_lists_evidence_backed_techniques_even_for_false_positive():
+    from itdr_agent.adjudicator import SYSTEM_PROMPT
+
+    text = SYSTEM_PROMPT.lower()
+    assert "mitre_techniques_observed" in text
+    assert "every technique pattern" in text
+    assert "even when the verdict is false_positive" in text
+    assert "mitre_attack_evidence" in text
+
+
+def test_system_prompt_allows_subtechniques_and_exact_ids():
+    from itdr_agent.adjudicator import SYSTEM_PROMPT
+
+    assert "T#### or T####.###" in SYSTEM_PROMPT
+    assert "exact IDs" in SYSTEM_PROMPT
+    assert "T1078.004" in SYSTEM_PROMPT
