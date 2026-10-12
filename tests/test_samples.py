@@ -10,6 +10,7 @@ account.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +21,29 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from itdr_agent.schemas import Verdict
 
 GROUND_TRUTH = PROJECT_ROOT / "data" / "fixtures" / "ground_truth.jsonl"
+
+FACT_PATTERNS = (
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+    r"LAPTOP-\d+",
+    r"HD-\d+",
+)
+
+KNOWN_FACTS = (
+    "New York",
+    "Seattle",
+    "Austin",
+    "Chicago",
+    "London",
+    "Toronto",
+    "Sydney",
+    "Sao Paulo",
+    "Moscow",
+    "Lagos",
+    "Amsterdam",
+    "Global Administrator",
+    "Helpdesk Administrator",
+    "Contoso Corporate VPN",
+)
 
 
 def _ground_truth() -> list[dict]:
@@ -98,3 +122,39 @@ def test_all_sample_reports_are_evidence_faithful():
             assert "disable" not in blob, (
                 f"{alert_id} suggested disabling for {report.verdict}"
             )
+
+
+def test_false_positive_samples_have_no_containment_steps():
+    for entry in _ground_truth():
+        if not entry["is_benign"]:
+            continue
+        _dossier, report = _sample(entry["alert_id"])
+        assert report.containment_steps == [], (
+            f"{entry['alert_id']} must not carry a pseudo containment step"
+        )
+        monitoring = " ".join(report.recommended_actions).lower()
+        assert "monitor" in monitoring
+
+
+def test_expected_wording_only_in_false_positive_narratives():
+    for entry in _ground_truth():
+        _dossier, report = _sample(entry["alert_id"])
+        if "expected" in report.narrative.lower():
+            assert report.verdict is Verdict.FALSE_POSITIVE, (
+                f"{entry['alert_id']} leaked benign 'expected' wording into "
+                f"{report.verdict}"
+            )
+
+
+def test_all_sample_narrative_facts_appear_in_dossier():
+    for entry in _ground_truth():
+        alert_id = entry["alert_id"]
+        dossier, report = _sample(alert_id)
+        blob = dossier.model_dump_json()
+        narrative = report.narrative
+        for pattern in FACT_PATTERNS:
+            for match in re.findall(pattern, narrative):
+                assert match in blob, f"{alert_id}: {match!r} not in dossier"
+        for fact in KNOWN_FACTS:
+            if fact in narrative:
+                assert fact in blob, f"{alert_id}: {fact!r} not in dossier"
