@@ -215,10 +215,27 @@ Standing prevention rules distilled from the above:
 | `benign_vpn` uses beta `networkLocationDetails` | The agent cannot know `198.51.100.x` is the company VPN from the IP alone; a trusted named network is the Graph-native explanation. |
 | Alert is allowlisted + wrapped like tool output | The full alert record (including `scenario`) must never reach the model; `build_alert_prompt` applies `ALERT_FIELD_ALLOWLIST` and the untrusted-data wrapper. |
 
+## Free OpenRouter Model (Checkpoint 5)
+
+Verified against `https://openrouter.ai/api/v1/models` and the model page
+`https://openrouter.ai/google/gemma-4-31b-it:free` (HTTP 200) in the pre-code
+check; no live tokens spent.
+
+| Field | Value |
+|---|---|
+| Model id | `google/gemma-4-31b-it:free` |
+| Name | Google: Gemma 4 31B (free) |
+| Pricing (prompt / completion) | `0` / `0` (free tier) |
+| Context length | 262,144 tokens |
+| Page | https://openrouter.ai/google/gemma-4-31b-it:free |
+
+`EVAL_MODEL` and the adjudicator integration script default to this id. The
+live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go.
+
 ## Open Problems
 
-1. **Which free OpenRouter model?** Must verify existence and availability before Checkpoint 5. Candidates: `mistralai/mistral-7b-instruct:free`, `meta-llama/llama-3.1-8b-instruct:free`, `microsoft/phi-3-medium-128k-instruct:free`.
-2. **Framework choice for Investigator.** `smolagents` vs. lightweight custom ReAct loop. Decision deferred to Checkpoint 4 implementation.
+1. ~~**Which free OpenRouter model?**~~ **Resolved (Checkpoint 5):** `google/gemma-4-31b-it:free`, confirmed free with a 262,144-token context on the OpenRouter models API and model page.
+2. ~~**Framework choice for Investigator.**~~ **Resolved (Checkpoint 4):** lightweight custom ReAct loop (exact cap, retry-once, fully mockable).
 
 ## Commit History
 
