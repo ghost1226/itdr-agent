@@ -70,6 +70,12 @@ Updated: Checkpoint 5 complete; next Checkpoint 6 (orchestration + HITL).
   - MITRE alignment: `T1078.004` everywhere; `T1621` only for 3+ MFA denials in 30 minutes (1–2 → indicator only); `T1528` only when a risky sign-in precedes the consent in-window.
   - `scripts/run_adjudicator_live.py` added (manual only; not run).
   - Four tests per technique: in-window / outside-window / wrong-direction-or-benign / below-threshold.
+- ✅ Checkpoint 5 fix (review): prompt guidance + faithful sample mocks.
+  - **Red:** `2e6a950` — tests only; `pytest` → **5 failed, 141 passed** (146 tests).
+  - **Green:** `221a907` — **146 passed**.
+  - Adjudicator prompt now says `mitre_techniques_observed` lists **every** evidence-backed technique pattern, **even when the verdict is FALSE_POSITIVE** (explain the benign reason in the narrative), and shows `T#### or T####.###`, instructing the model to use the **exact IDs** from `mitre_attack_evidence` (sub-technique example `T1078.004`).
+  - New `itdr_agent/samples.py` builds deterministic, offline mocked sample reports whose narrative is composed from the real dossier, so it cannot invent evidence (`python -m itdr_agent.samples ALERT_001 ALERT_007`).
+  - New `tests/test_mitre_ids.py` guard: no bare `T1078` in `itdr_agent/` or `scripts/`; fixed the stale `(T1078)` comment in `data_generator.py`.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -287,3 +293,5 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 - `230b571` — checkpoint-5: record free OpenRouter model (google/gemma-4-31b-it:free)
 - `a2ed3f5` — checkpoint-5: red — adjudicator, T1078.004, T1621 30-min, T1528 prior risky sign-in, MITRE guard
 - `cdac646` — checkpoint-5: green — Adjudicator, T1078.004, T1621 30-min burst, T1528 prior risky sign-in, MITRE guard
+- `2e6a950` — checkpoint-5-fix: red — prompt FALSE_POSITIVE/sub-technique guidance, faithful sample mocks, no bare T1078
+- `221a907` — checkpoint-5-fix: green — prompt guidance, faithful sample mocks, T1078.004 comment
