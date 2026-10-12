@@ -64,6 +64,15 @@ Updated: Checkpoint 1b complete; next Checkpoint 4 task 8 (alert wrapper), befor
   - `benign_admin_role` keeps `expected_mitre == ["T1098.003"]`: the pattern is real, so the mapper still emits it; legitimacy is the analyst's call.
   - `tests/test_graph_fields.py` is the graph-field-check allowlist test (per resource). It caught `riskyUser.riskEventTypes_v2` — not a real `riskyUser` field — which is now removed and replaced with valid `riskyUser` fields.
   - Same seed ⇒ byte-identical for all five files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
+- ✅ Checkpoint 1b fix (review): realistic baseline + physically plausible benign cases.
+  - **Red:** `18a74d0` — tests only; `pytest` → **6 failed, 3 errors, 95 passed** (104 tests).
+  - **Green:** `49edfdc` — **104 passed**; fixtures regenerated (users 29, sign-ins 129, audits 53, alerts 10, ground_truth 10, user_context 29).
+  - Every user now has a home city, 1–2 stable devices, and a 2–3 IP set (`user_context.jsonl`); baseline sign-ins come only from those (no random city/device/IP).
+  - `benign_travel` is now New York 09:05 → London 17:20 (8h15m, ~675 km/h), same known compliant device.
+  - `benign_vpn` sign-ins carry the **beta** `networkLocationDetails` (`networkType: namedNetwork`, `networkNames: ["Contoso Corporate VPN"]`) on a known device.
+  - Baseline audits are initiated only by `ADMIN_UPNS` and never target scenario users (the only non-admin initiator left is dave's self-consent).
+  - New test `test_benign_alerts_are_physically_plausible`: whole investigation window on known devices, no consecutive leg > 900 km/h, no non-admin action on the user.
+  - Same seed ⇒ byte-identical for all six files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
 
 ## Microsoft Graph Schema Sources
 
@@ -78,12 +87,14 @@ Field names in `itdr_agent/data_generator.py` follow these published shapes:
 | `deviceDetail` (v1.0) | `deviceId`, `displayName`, `operatingSystem`, `browser`, `isCompliant`, `isManaged`, `trustType` | https://learn.microsoft.com/en-us/graph/api/resources/devicedetail?view=graph-rest-1.0 |
 | `user` (v1.0) | `id`, `userPrincipalName`, `displayName`, `department`, `jobTitle`, `manager`, `hireDate`, `accountEnabled` | https://learn.microsoft.com/en-us/graph/api/resources/user?view=graph-rest-1.0 |
 | `riskyUser` (v1.0) | `id`, `userDisplayName`, `userPrincipalName`, `riskLevel`, `riskState`, `riskDetail`, `riskLastUpdatedDateTime`, `isDeleted`, `isProcessing` | https://learn.microsoft.com/en-us/graph/api/resources/riskyuser?view=graph-rest-1.0 |
+| `networkLocationDetails` (beta `signIn` field) | `networkNames`, `networkType` (`intranet`, `extranet`, `namedNetwork`, `trusted`, `unknownFutureValue`) | https://learn.microsoft.com/en-us/graph/api/resources/networklocationdetail?view=graph-rest-beta |
 
 Notes verified against the live docs page:
 - `riskEventTypes` is **deprecated**; we emit `riskEventTypes_v2`.
 - Valid `riskEventTypes_v2` values include `unlikelyTravel`, `anonymizedIPAddress`, `unfamiliarFeatures`.
 - Anonymous IP is therefore `riskEventTypes_v2 == ["anonymizedIPAddress"]`, **not** a `riskEventType` scalar.
 - `riskyUser` does **not** have `riskEventTypes_v2`; that field is on `signIn`. The `riskyUser` fields we use are confirmed on the `riskyUser` page above.
+- `networkLocationDetails` is **beta-only** on `signIn` (v1.0 does not have it), so it is marked beta. `networkType` values confirmed on the `networkLocationDetail` page: `intranet`, `extranet`, `namedNetwork`, `trusted`, `unknownFutureValue`. We use `namedNetwork` + `networkNames` to mark the company VPN.
 
 ## MITRE ATT&CK Checklist
 
@@ -106,7 +117,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Checkpoint 1b — complete (red `d49281d`, green `3e70589`, 96 tests).**
+**Checkpoint 1b — complete (red `d49281d`, green `3e70589`, then review fix red `18a74d0`, green `49edfdc`; 104 tests).**
 
 **Next (per Joe): Checkpoint 4 task 8, before Checkpoint 5** — the alert
 allowlist + untrusted-data wrapper + no-answer-key test, as its own red/green
@@ -192,6 +203,8 @@ Standing prevention rules distilled from the above:
 | `benign_admin_role` keeps `T1098.003` in `expected_mitre` | The role-add pattern is real; deciding it is legitimate (helpdesk ticket) is the analyst's/Adjudicator's job, not the mapper's. |
 | Three benign + thin-data + unknown alerts | False-positive control and the low-confidence `ask_user` path need ground-truth cases. |
 | graph-field-check allowlist test per resource | Catches invented/renamed fields; it caught `riskyUser.riskEventTypes_v2`. |
+| `user_context.jsonl` (home city, known devices, stable IPs) | Realistic baseline noise; lets tests prove benign cases are physically plausible without putting project fields in Graph records. |
+| `benign_vpn` uses beta `networkLocationDetails` | The agent cannot know `198.51.100.x` is the company VPN from the IP alone; a trusted named network is the Graph-native explanation. |
 
 ## Open Problems
 
@@ -226,3 +239,5 @@ Standing prevention rules distilled from the above:
 - `139ffea` — plan: rubric additions, ground-truth split, 3 approved project skills
 - `d49281d` — checkpoint-1b: red — benign/thin/unknown alerts, ground-truth split, graph field allowlist, riskyUser fix
 - `3e70589` — checkpoint-1b: green — benign/thin/unknown alerts, ground-truth split, field allowlist, riskyUser fix
+- `18a74d0` — checkpoint-1b-fix: red — home-city/known-device/IP baseline, real-flight travel, named-network VPN, admin-only audits, benign plausibility
+- `49edfdc` — checkpoint-1b-fix: green — home-city/known-device/IP baseline, real-flight travel, named-network VPN, admin-only audits
