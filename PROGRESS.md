@@ -1,12 +1,12 @@
 # Progress Diary — ITDR Identity Incident Builder
 
-Updated: Checkpoint 6 complete; next Checkpoint 7 (evaluation harness, needs Joe's go for live runs).
+Updated: Checkpoint 6 passed review. Next: Checkpoint 7 (evaluation) tomorrow — blocked on Joe's OpenRouter key in `.env` and his credits decision.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 6 — complete. Next: Checkpoint 7 — Evaluation harness (live free model; wait for Joe's go).**
+**Checkpoint 6 — passed review. Next: Checkpoint 7 — Evaluation harness; blocked until Joe puts his OpenRouter key in `.env` and decides on credits.**
 
 ## What's Done
 
@@ -96,6 +96,7 @@ Updated: Checkpoint 6 complete; next Checkpoint 7 (evaluation harness, needs Joe
   - `itdr_agent/human.py`: frozen `ask_user` contract (`cancelled` is exactly "no decision has been supplied"), `ContainmentDecision`, `ScriptedReviewer`/`CliReviewer`.
   - Analyst answers are wrapped in `<analyst_input untrusted="true">` (escaped), never inside the dossier block; the dossier gains `InvestigatorOutput.analyst_context`.
   - `python -m itdr_agent --alert-id ALERT_001` (live) and `python scripts/demo_orchestrator.py` (offline, no tokens).
+  - **Review: passed (Jessica).** She ran the offline demo in a clean copy; the approve/edit/reject audit lines, the analyst-input breakout probe, and the ALERT_010 short-circuit all check out.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -171,7 +172,13 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 **Checkpoint 1b — complete ...; 106 tests). Checkpoint 4 task 8 — complete (`377d586`/`5dd360d`; 112 tests). Checkpoint 5 — complete (`a2ed3f5`/`cdac646`, then `2e6a950`/`221a907`, `01212d6`/`c6d7132`, `45ebedd`/`8e8912c`; 153 tests). Checkpoint 6 — complete (`efe5d05`/`b6d266d`; 165 tests).**
 
-**Next: Checkpoint 7 — Evaluation harness (live free model; Joe's go required):**
+**Next: Checkpoint 7 — Evaluation harness. BLOCKED until Joe puts his OpenRouter key in `.env` and decides on credits. Do not run the live key until then.**
+
+Apply these first in Checkpoint 7:
+1. **`run_id` on every audit line** (including `run`, `containment_decision`, `ask_user`, `re_adjudication`, `mitre_rejection`), so the 3 runs per alert in the evaluation can be told apart.
+2. **Failure rows, never crashes:** in `scripts/evaluate.py`, a MITRE rejection, a parse error, a timeout, or a 429 must become a failure-table row for that run (alert, what went wrong, why) — not an exception that aborts the evaluation.
+
+Then:
 1. `scripts/evaluate.py`: all 10 alerts × 3 runs through the real orchestrator/model (`EVAL_MODEL`, default `google/gemma-4-31b-it:free`).
 2. Metrics: verdict accuracy (primary), attack-vs-benign detection (secondary), false positives, MITRE precision, multi-run agreement, tokens/seconds per run, failure table.
 3. Save `eval/results.md` + `eval/raw.jsonl`; offline `tests/test_evaluate.py` with a fake runner.
