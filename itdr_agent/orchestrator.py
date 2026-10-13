@@ -13,6 +13,12 @@ Flow for one alert:
 5. Review each containment step: approve / edit / reject.
 6. Append a run entry (hashes, tool calls, counters) to ``logs/audit.jsonl``.
 
+Total timeout: ``timeout_seconds`` (``TIMEOUT_SECONDS``, default 120) caps the
+machine's time for one alert. The Investigator checks the deadline before each
+model turn, and the orchestrator checks it before the Adjudicator and before a
+re-adjudication. Time the analyst spends answering the one question does not
+count. Overrun → a ``timeout`` audit line and ``OrchestrationTimeoutError``.
+
 No live tokens: tests inject mocked LLMs and a ``ScriptedReviewer``.
 """
 
@@ -21,14 +27,17 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from . import config
 from .adjudicator import Adjudicator, UnsupportedMitreClaimError
 from .human import Reviewer
+from .investigator import InvestigationTimeoutError
 from .schemas import (
     CONFIDENCE_THRESHOLD,
     AdjudicatorOutput,
@@ -52,6 +61,10 @@ class AnonymizationError(Exception):
 
 class OrchestrationError(Exception):
     """Base class for orchestration failures."""
+
+
+class OrchestrationTimeoutError(OrchestrationError, TimeoutError):
+    """The run went past its total timeout (TIMEOUT_SECONDS)."""
 
 
 def assert_synthetic(payload: Any) -> None:
@@ -92,13 +105,18 @@ class Orchestrator:
         adjudicator: Adjudicator,
         reviewer: Reviewer,
         audit_log: str | Path | None = None,
-        timeout_seconds: int = 120,
+        timeout_seconds: int | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.investigator = investigator
         self.adjudicator = adjudicator
         self.reviewer = reviewer
         self.audit_log = Path(audit_log) if audit_log else DEFAULT_AUDIT_LOG
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = (
+            config.TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+        )
+        self.clock = clock
+        self._deadline = 0.0
         self._questions_asked = 0
         self._re_adjudications = 0
 
@@ -115,7 +133,15 @@ class Orchestrator:
 
         assert_synthetic(alert)  # governance: no real domains
 
-        dossier = self.investigator.investigate(alert)
+        self._deadline = self.clock() + self.timeout_seconds
+        if hasattr(self.investigator, "deadline"):
+            self.investigator.deadline = self._deadline
+            self.investigator.clock = self.clock
+        try:
+            dossier = self.investigator.investigate(alert)
+        except InvestigationTimeoutError as exc:
+            self._log_timeout(run_id, alert_id, "investigation")
+            raise OrchestrationTimeoutError(str(exc)) from exc
         tool_calls = getattr(self.investigator, "tool_calls_made", 0)
         llm_called = False
         short_circuited = False
@@ -124,6 +150,7 @@ class Orchestrator:
             short_circuited = True
             report = self._critical_gap_report()
         else:
+            self._check_deadline(run_id, alert_id, "adjudication")
             report = self._adjudicate(dossier, run_id)  # logs+raises on bad MITRE
             llm_called = True
             if self._should_ask(report):
@@ -165,11 +192,30 @@ class Orchestrator:
 
     # --- internals ---------------------------------------------------------
 
+    def _check_deadline(self, run_id: str, alert_id: str, stage: str) -> None:
+        if self.clock() >= self._deadline:
+            self._log_timeout(run_id, alert_id, stage)
+            raise OrchestrationTimeoutError(
+                f"total timeout of {self.timeout_seconds}s reached before {stage}"
+            )
+
+    def _log_timeout(self, run_id: str, alert_id: str, stage: str) -> None:
+        self._append(
+            run_id,
+            {
+                "event": "timeout",
+                "timestamp": _now(),
+                "alert_id": alert_id,
+                "stage": stage,
+                "timeout_seconds": self.timeout_seconds,
+            },
+        )
+
     def _adjudicate(
         self, dossier: InvestigatorOutput, run_id: str
     ) -> AdjudicatorOutput:
         try:
-            return self.adjudicator.adjudicate(dossier)
+            report = self.adjudicator.adjudicate(dossier)
         except UnsupportedMitreClaimError as exc:
             self._append(
                 run_id,
@@ -181,6 +227,17 @@ class Orchestrator:
                 },
             )
             raise
+        if report.action_claims:
+            self._append(
+                run_id,
+                {
+                    "event": "action_claim",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "claims": report.action_claims,
+                },
+            )
+        return report
 
     @staticmethod
     def _should_ask(report: AdjudicatorOutput) -> bool:
@@ -226,7 +283,9 @@ class Orchestrator:
             {"label": "The activity is suspicious/malicious"},
             {"label": "I don't know"},
         ]
+        asked_at = self.clock()
         result = self.reviewer.ask(question, options, True)
+        self._deadline += self.clock() - asked_at  # analyst time doesn't count
         self._questions_asked += 1
         self._append(
             run_id,
@@ -255,6 +314,7 @@ class Orchestrator:
         if self._re_adjudications >= 1:
             return report
 
+        self._check_deadline(run_id, alert_id, "re_adjudication")
         self._re_adjudications += 1
         new_report = self._adjudicate(dossier, run_id)
         self._append(

@@ -210,8 +210,16 @@ class _LiveAdjudicatorLLM:
         return _chat(self.client, self.model, self.budget, messages)
 
 
-def make_live_runner(api_key: str, model: str, timeout: int, audit_log: Path):
+def make_live_runner(
+    api_key: str,
+    model: str,
+    timeout: int,
+    audit_log: Path,
+    total_timeout: int | None = None,
+):
+    """``timeout`` caps each request (90 s); ``total_timeout`` caps a whole run."""
     client = make_openrouter_client(api_key, timeout)
+    total = config.TIMEOUT_SECONDS if total_timeout is None else total_timeout
 
     def run(alert, run_index, run_id, budget):
         orchestrator = Orchestrator(
@@ -219,7 +227,7 @@ def make_live_runner(api_key: str, model: str, timeout: int, audit_log: Path):
             Adjudicator(_LiveAdjudicatorLLM(client, model, budget)),
             make_eval_reviewer(),
             audit_log=audit_log,
-            timeout_seconds=timeout,
+            timeout_seconds=total,
         )
         return orchestrator.run(alert, run_id=run_id)
 
@@ -926,7 +934,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = run_evaluation(
         alerts, ground_truth,
         make_live_runner(config.OPENROUTER_API_KEY, args.model, timeout,
-                         eval_dir / "audit.jsonl"),
+                         eval_dir / "audit.jsonl",
+                         total_timeout=config.TIMEOUT_SECONDS),
         runs_per_alert=args.runs, eval_dir=eval_dir, model=args.model,
         daily_budget=args.daily_budget, only=only,
     )

@@ -79,6 +79,9 @@ class AdjudicatorOutput(BaseModel):
     recommended_actions: list[str] = Field(default_factory=list)
     mitre_techniques_observed: list[str] = Field(default_factory=list)
     audit_notes: str = ""
+    # Set by code (adjudicator.apply_action_claim_guard), never by the model:
+    # phrases where the report claims an action was already taken.
+    action_claims: list[str] = Field(default_factory=list)
 
 
 CONFIDENCE_THRESHOLD = 0.7

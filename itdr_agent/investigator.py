@@ -24,6 +24,7 @@ MITRE derivation is direction- and time-aware:
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -97,6 +98,10 @@ def build_alert_prompt(alert: dict[str, Any]) -> str:
     return wrap_tool_output("alert", filter_alert(alert))
 
 
+class InvestigationTimeoutError(TimeoutError):
+    """The orchestrator's total-time deadline passed between model turns."""
+
+
 class Investigator:
     """ReAct-style investigator with a hard tool-call cap."""
 
@@ -110,6 +115,9 @@ class Investigator:
         self.max_tool_calls = max_tool_calls
         self._execute_tool = tool_executor or call_tool
         self.tool_calls_made = 0
+        # Set per run by the orchestrator (total timeout); None = no deadline.
+        self.deadline: float | None = None
+        self.clock: Callable[[], float] = time.monotonic
 
     # --- public ------------------------------------------------------------
 
@@ -130,6 +138,10 @@ class Investigator:
         ]
 
         while True:
+            if self.deadline is not None and self.clock() >= self.deadline:
+                raise InvestigationTimeoutError(
+                    f"total timeout reached after {self.tool_calls_made} tool calls"
+                )
             action = self.llm.next_action(messages)
             if not isinstance(action, dict) or action.get("action") != "tool":
                 break

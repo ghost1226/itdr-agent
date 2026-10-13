@@ -16,6 +16,7 @@ The free-model id is verified in PROGRESS.md. The live integration script
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .schemas import (
@@ -61,6 +62,41 @@ SYSTEM_PROMPT = (
     "mitre_attack_evidence that the evidence supports, even when the verdict "
     "is FALSE_POSITIVE; in that case, explain in the narrative why the "
     "evidence is benign (for example, a ticket-backed admin role add).\n"
+    "You only recommend. You never act: never say that any step was executed, "
+    "applied, performed, or completed. Every containment step is a proposal "
+    "that a human must approve before anyone carries it out.\n"
+)
+
+# The agent executes nothing; it only recommends steps a human approves.
+# These patterns catch a report claiming otherwise (Nemotron wrote
+# "Containment steps executed as per playbook" in the 2026-10-12 smoke test).
+_ACTION_CLAIM_PATTERNS = [
+    re.compile(
+        r"\b(?:containment|remediation)"
+        r"(?:\s+(?:steps?|actions?|measures?|playbook))?"
+        r"\s+(?:(?:was|were|has|have)\s+(?:been\s+)?)?"
+        r"(?:executed|applied|performed|completed|implemented|carried out|enforced)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:executed|applied|performed|implemented|completed|carried out)"
+        r"\s+(?:the\s+|all\s+|these\s+)?(?:containment|remediation|playbook)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:I|we)\s+(?:have\s+|has\s+|already\s+)?"
+        r"(?:disabled|reset|revoked|blocked|locked|isolated|terminated|"
+        r"executed|applied|removed|suspended)\b",
+        re.IGNORECASE,
+    ),
+]
+_NEGATION = re.compile(r"\b(?:no|not|never|without|nothing)\b", re.IGNORECASE)
+_SENTENCE_BREAK = re.compile(r"[.;!?]")
+
+ACTION_CLAIM_NOTE = (
+    "Action-claim guard: the report says actions were already taken ({claims}). "
+    "The agent executes nothing; every containment step is a recommendation "
+    "that needs human approval."
 )
 
 
@@ -108,6 +144,38 @@ def parse_adjudicator_output(raw: str) -> AdjudicatorOutput:
         raise AdjudicatorParseError(str(exc)) from exc
 
 
+def _report_texts(report: AdjudicatorOutput) -> list[str]:
+    texts = [report.narrative, report.audit_notes, *report.recommended_actions]
+    for step in report.containment_steps:
+        texts.extend([step.step, step.rollback])
+    return texts
+
+
+def find_action_claims(report: AdjudicatorOutput) -> list[str]:
+    """Phrases where the report claims an action was taken (negations skipped)."""
+    found: list[str] = []
+    for text in _report_texts(report):
+        for pattern in _ACTION_CLAIM_PATTERNS:
+            for match in pattern.finditer(text):
+                before = _SENTENCE_BREAK.split(text[: match.start()])[-1]
+                if _NEGATION.search(before):
+                    continue  # "No containment steps were executed."
+                claim = match.group(0).strip()
+                if claim not in found:
+                    found.append(claim)
+    return found
+
+
+def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
+    """Flag (never reject) claims of action; the flag is set by code only."""
+    claims = find_action_claims(report)
+    report.action_claims = claims
+    if claims:
+        note = ACTION_CLAIM_NOTE.format(claims="; ".join(f'"{c}"' for c in claims))
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+    return report
+
+
 def invalid_mitre_claims(
     report: AdjudicatorOutput, dossier: InvestigatorOutput
 ) -> list[str]:
@@ -144,5 +212,6 @@ class Adjudicator:
         raw = self.llm.complete(messages)
         report = parse_adjudicator_output(raw)
         report = apply_confidence_guardrail(report)
+        report = apply_action_claim_guard(report)
         assert_mitre_claims_supported(report, dossier)
         return report
