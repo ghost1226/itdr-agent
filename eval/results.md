@@ -1,6 +1,6 @@
 # ITDR Evaluation Results
 
-> **PARTIAL:** 6 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
+> **PARTIAL:** 12 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
 
 ## Method
 
@@ -9,24 +9,24 @@
 - **Reviewer:** a scripted reviewer approves every containment step and cancels every `ask_user` question. No human is in the loop during scoring, so the one-question re-adjudication path is never exercised.
 - **Labels:** `data/fixtures/ground_truth.jsonl`, read only by this script and the tests; the agents never see it.
 - **Limits:** at most 20 requests/minute and 45 requests/UTC day (free cap 50); a run starts only with room for its worst case (10 requests).
-- **Run days (UTC):** 2026-10-12.
+- **Run days (UTC):** 2026-10-12, 2026-10-13.
 
 ## Headline metrics
 
 | Metric | Value |
 |---|---|
-| Runs complete | 6 of 30 (0 failed) |
-| Exact verdict accuracy (primary; failed runs count as wrong) | 100.0% |
-| Exact verdict accuracy, runs that returned a verdict | 100.0% |
+| Runs complete | 12 of 30 (0 failed) |
+| Exact verdict accuracy (primary; failed runs count as wrong) | 91.7% |
+| Exact verdict accuracy, runs that returned a verdict | 91.7% |
 | Majority-of-3 verdict accuracy (per alert) | 100.0% |
-| Attack-vs-benign detection (8 labeled alerts) | 100.0% (6 runs) |
-| False positives (benign runs called COMPROMISED/SUSPICIOUS) | 0 of 0 |
-| MITRE precision | 100.0% (TP 6, FP 0) |
+| Attack-vs-benign detection (8 labeled alerts) | 100.0% (12 runs) |
+| False positives (benign runs called COMPROMISED/SUSPICIOUS) | 0 of 3 |
+| MITRE precision | 100.0% (TP 9, FP 0) |
 | MITRE recall | 100.0% (FN 0) |
-| Multi-run agreement | 100.0% |
-| Model requests | 38 total |
-| Tokens in / out | 64435 / 15435 total; 10739.2 / 2572.5 per run |
-| Seconds | 218.9 total; 36.5 per run |
+| Multi-run agreement | 91.7% |
+| Model requests | 80 total |
+| Tokens in / out | 131179 / 35709 total; 10931.6 / 2975.8 per run |
+| Seconds | 514.0 total; 42.8 per run |
 
 ## Per alert
 
@@ -34,6 +34,8 @@
 |---|---|---|---|---|---|
 | ALERT_001 | impossible_travel | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
 | ALERT_002 | mfa_fatigue | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
+| ALERT_003 | anonymous_ip | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
+| ALERT_006 | benign_travel | FALSE_POSITIVE | INSUFFICIENT_DATA, FALSE_POSITIVE, FALSE_POSITIVE | FALSE_POSITIVE | yes |
 
 ## Per run
 
@@ -45,10 +47,18 @@
 | ALERT_002 | 1 | COMPROMISED | 0.92 | T1621 | 5 | 9678/2252 | 26.5 | - |
 | ALERT_002 | 2 | COMPROMISED | 0.92 | T1621 | 7 | 16114/3131 | 40.5 | - |
 | ALERT_002 | 3 | COMPROMISED | 0.88 | T1621 | 5 | 9540/1274 | 26.4 | - |
+| ALERT_003 | 1 | COMPROMISED | 0.86 | T1090.003 | 7 | 9531/2959 | 46.1 | - |
+| ALERT_003 | 2 | COMPROMISED | 0.85 | T1090.003 | 7 | 9531/2868 | 43.5 | - |
+| ALERT_003 | 3 | COMPROMISED | 0.88 | T1090.003 | 7 | 9531/3360 | 40.3 | - |
+| ALERT_006 | 1 | INSUFFICIENT_DATA | 0.55 | - | 6 | 9143/2715 | 42.0 | - |
+| ALERT_006 | 2 | FALSE_POSITIVE | 0.90 | - | 7 | 11503/3316 | 50.7 | - |
+| ALERT_006 | 3 | FALSE_POSITIVE | 0.70 | - | 8 | 17505/5056 | 72.6 | - |
 
 ## Failure table
 
-No failures.
+| Alert | Run | What went wrong | Why |
+|---|---|---|---|
+| ALERT_006 | 1 | expected FALSE_POSITIVE, got INSUFFICIENT_DATA | Alert ALERT_006 generated; no MITRE technique evidence present; data gaps none. Sign-in history shows normal activity from a managed, compliant device with no risk flags; the observed location change from New York to London is consistent with legitimate travel and there are no indicators of compr... |
 
 ## Interrupted attempts (retried in a later session)
 
