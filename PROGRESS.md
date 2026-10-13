@@ -2,13 +2,13 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's go for the live evaluation, starting with a 1-run smoke test.
+Updated 2026-10-13: live evaluation in progress (Joe's half 12/15; ALERT_009 x3 left). Checkpoint 7 fix 2 landed: total timeout enforced + action-claim guard (237 tests).
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 7 — harness built and tested offline (197 tests). The live evaluation has NOT been run. Waiting for Joe's go.**
+**Checkpoint 7 — live evaluation running (split 15/15 with Joe's partner). Joe's half: 12 of 15 runs done (day 1 `7990b79`, day 2 `3c65367`). Fix 2 landed mid-eval (`ccb1b61`/`d0d6b15`); see below for which runs came before it.**
 
 ## What's Done
 
@@ -111,6 +111,13 @@ Updated 2026-10-12: Checkpoint 7 harness built (offline tests pass). Next: Joe's
   - **Review fixes (separate review pass):** red `f34b67e` (**4 failed**), green `f6cd9af` — **201 passed**. (1) 400/404 (wrong model id, unsupported `response_format`) now **stop** instead of recording 30 failed runs; (2) 5xx and connection errors **skip** the run (logged in `interruptions.jsonl`, retried next session) instead of scoring infrastructure as model failure; (3) `--alerts` limits only what runs — `results.md` and "Runs still pending" always cover all 10 alerts × 3, so a smoke test reads "1 of 30", not "all runs complete".
   - **Split between two people (2026-10-12):** red `1ffb60f` (5 failing), green `55cddaa` — **206 passed**. Each person runs their own alerts on their own free account (`--alerts ...`, partner uses `--eval-dir eval/partner`); the run prints "Your alerts: X of Y runs done". `--combine eval eval/partner` merges both into `eval/final/` (raw + results, each run tagged with its source; refuses a run that appears twice; keeps only the chosen model). Split: Joe ALERT_001, 002, 003, 006, 009; partner ALERT_004, 005, 007, 008, 010. Budget spacing is now read at run time.
   - **Dry run:** 30 runs, 207 requests (6–7 per run with the offline tool script) → **about 5 days at 45/day; worst case 8**.
+- ✅ Checkpoint 7 fix 2 (Joe: "fix now", 2026-10-13, mid-evaluation): total timeout + action-claim guard.
+  - **Red:** `ccb1b61` — tests only; `pytest` → **31 failed, 206 passed** (237 tests).
+  - **Green:** `d0d6b15` — **237 passed**. Dry run unchanged (207 requests); offline demo unchanged; 0 action claims flagged on the canned sample reports.
+  - **Total timeout enforced:** `Orchestrator(timeout_seconds=None → config.TIMEOUT_SECONDS, default 120, clock=time.monotonic)`. The Investigator checks the deadline before each model turn (`InvestigationTimeoutError`), the orchestrator before the Adjudicator and before a re-adjudication. Analyst think time (the one `ask_user`) is added back to the deadline, so a person is never timed out. Overrun → `timeout` audit line (`stage`: investigation / adjudication / re_adjudication) and `OrchestrationTimeoutError` (a `TimeoutError`, so the eval records it as a failed `timeout` run).
+  - **Eval wiring bug fixed:** `make_live_runner` was passing the 90 s per-request cap as the orchestrator's total; it now passes `TIMEOUT_SECONDS` (120) via `total_timeout`.
+  - **Action-claim guard (flag, never reject):** `find_action_claims` scans narrative, audit notes, recommended actions, and steps for claims that containment/remediation was executed/applied/performed/completed, or first-person "I/we disabled/reset/revoked…"; negated sentences ("No containment steps were executed") and evidence ("the sign-in was blocked", "Helpdesk reset the password") are not flagged. `apply_action_claim_guard` sets `AdjudicatorOutput.action_claims` (code-owned; a model-supplied value is replaced) and appends an audit note; the verdict is untouched. The orchestrator logs an `action_claim` audit line. System prompt: "You only recommend… never say that any step was executed… a human must approve."
+  - **Mid-eval effect:** Joe's runs from 2026-10-12 (ALERT_001 x3, ALERT_002 x3) and 2026-10-13 (ALERT_003 x3, ALERT_006 x3) ran **before** this fix; ALERT_009 and any partner run after `git pull` run with it. Before the fix there was no total time cap (observed runs 26–73 s, so 120 s would not have cut any of them). The prompt rule may change wording in later runs; verdict scoring is unaffected.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -194,7 +201,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
 4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README.
 
-Open: the orchestrator's `timeout_seconds` (Checkpoint 6, PLAN: total timeout 120 s) is stored but never enforced; only the per-request client timeout (90 s) applies. Raise with Joe before fixing.
+~~Open: the orchestrator's total timeout was never enforced.~~ **Fixed 2026-10-13** (`ccb1b61`/`d0d6b15`).
 
 ## Mistakes & Lessons
 
@@ -215,6 +222,7 @@ mistake made in this project, its root cause, and the rule that prevents it.
 | Tool-data wrapper could be broken out of with `</microsoft_graph_data>` | `json.dumps` leaves `<`/`>` unescaped | Escape `<`/`>` to `\u003c`/`\u003e` so the closing tag appears exactly once | `541047f` / `2d9a680` |
 | Pi's Checkpoint 7 draft: live mode was a placeholder; failed runs were never written to raw output; a run could start with only 1 request of budget left and overshoot the cap; previous days' results were dropped on resume; a 429 marked the run as done; the request estimate was a hard-coded 6 | Draft written before the tests, and the tests never ran | Write the tests first and include the live path (fake client); count requests where they are sent; reserve the worst case before a run starts; resume from the raw file, not memory | `7e847f4` / `22dd74d` |
 | Checkpoint 7 fix 1 landed without a separate red commit | Tests and code committed together | Red-green holds for fixes too; red verified after the fact against the parent commit | `70217a0` |
+| Eval passed the 90 s per-request cap as the orchestrator's 120 s total | One `timeout` variable reused for two different limits | Name limits by what they cap (`timeout` per request, `total_timeout` per run) and test the wiring | `ccb1b61` / `d0d6b15` |
 | Emitted `riskEventTypes_v2` on a `riskyUser` record | Copied a `signIn` field onto the `riskyUser` shape | Use the graph-field-check allowlist per resource; a field on one Graph resource is not valid on another | `3e70589` |
 
 Standing prevention rules distilled from the above:
@@ -303,8 +311,9 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 1. ~~**Which free OpenRouter model?**~~ **Resolved (Checkpoint 5):** `google/gemma-4-31b-it:free`, confirmed free with a 262,144-token context on the OpenRouter models API and model page.
 2. ~~**Framework choice for Investigator.**~~ **Resolved (Checkpoint 4):** lightweight custom ReAct loop (exact cap, retry-once, fully mockable).
 3. **Eval model ≠ Checkpoint 5 model.** Gemma 4 31B (free) was rate-limited upstream; the evaluation runs on Nemotron 3 Super (free). Free models can change or vanish, so results may not reproduce later. Say so in PROJECT_BRIEF "Limits and risks".
-4. **Model overclaims actions.** Nemotron's `audit_notes` said "Containment steps executed as per playbook"; the agent executes nothing (same as HW4). Candidate fix: a prompt rule plus a code check rejecting "executed/applied" claims. Not built; talk with Joe first.
-5. **Orchestrator total timeout not enforced.** `timeout_seconds` (PLAN Checkpoint 6: 120 s total) is stored but unused; only the 90 s per-request client timeout applies. Fix needs Joe's OK.
+4. ~~**Model overclaims actions.**~~ **Fixed 2026-10-13** (`d0d6b15`): recommend-only prompt rule + action-claim guard that flags (does not reject) and logs `action_claim`. Runs before the fix are not re-scored.
+5. ~~**Orchestrator total timeout not enforced.**~~ **Fixed 2026-10-13** (`d0d6b15`), including the eval passing 90 s instead of 120 s.
+8. **Mid-eval code change.** 12 of Joe's runs predate fix 2; say so in PROJECT_BRIEF.
 6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
 
@@ -363,3 +372,7 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `f6cd9af` — checkpoint-7-fix: green — same
 - `1ffb60f` — checkpoint-7-split: red — per-person progress line and combining two people's results
 - `55cddaa` — checkpoint-7-split: green — per-person progress line and --combine for two people's results
+- `7990b79` — Eval day 1 (2026-10-12, Joe's half): ALERT_001 x3, ALERT_002 x3 on Nemotron
+- `3c65367` — Eval day 2 (2026-10-13, Joe's half): ALERT_003 x3, ALERT_006 x3 on Nemotron
+- `ccb1b61` — checkpoint-7-fix2: red — total timeout + action-claim tests
+- `d0d6b15` — checkpoint-7-fix2: green — total timeout enforced, action-claim guard, recommend-only prompt
