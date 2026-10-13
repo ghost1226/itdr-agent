@@ -848,3 +848,30 @@ def test_t1098_003_role_add_for_other_user_not_mapped():
     )
     _, mitre = derive_indicators(_evidence(audits=[audit]), ALICE, _ALERT_TIME)
     assert "T1098.003" not in mitre
+
+
+# --- Total-timeout deadline (set by the orchestrator) ----------------------
+
+
+def test_investigator_stops_once_the_deadline_has_passed():
+    from itdr_agent.investigator import InvestigationTimeoutError, Investigator
+
+    now = [1000.0]
+    llm = ScriptedLLM([{"action": "tool", "tool": "get_user_profile",
+                        "arguments": {"upn": ERIN}}])
+    inv = Investigator(llm)
+    inv.clock = lambda: now[0]
+    inv.deadline = 999.0  # already past
+    with pytest.raises(InvestigationTimeoutError):
+        inv.investigate({"id": "ALERT_X", "userPrincipalName": ERIN})
+    assert llm.turns == 0  # no model call after the deadline
+    assert issubclass(InvestigationTimeoutError, TimeoutError)
+
+
+def test_investigator_without_deadline_runs_normally():
+    from itdr_agent.investigator import Investigator
+
+    inv = Investigator(ScriptedLLM([]))
+    assert inv.deadline is None
+    dossier = inv.investigate({"id": "ALERT_X", "userPrincipalName": ERIN})
+    assert dossier.alert_id == "ALERT_X"

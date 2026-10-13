@@ -239,3 +239,92 @@ def test_system_prompt_allows_subtechniques_and_exact_ids():
     assert "T#### or T####.###" in SYSTEM_PROMPT
     assert "exact IDs" in SYSTEM_PROMPT
     assert "T1078.004" in SYSTEM_PROMPT
+
+
+# --- Action-claim guard: the agent recommends, it never acts ---------------
+
+
+@pytest.mark.parametrize(
+    "field,text",
+    [
+        ("audit_notes", "Containment steps executed as per playbook."),
+        ("audit_notes", "All containment actions have been applied."),
+        ("narrative", "We have disabled the account and revoked sessions."),
+        ("narrative", "I reset the user's password."),
+        ("audit_notes", "Executed the containment playbook at 10:02."),
+        ("audit_notes", "Remediation was completed."),
+    ],
+)
+def test_action_claims_are_found(field, text):
+    from itdr_agent.adjudicator import find_action_claims
+
+    report = AdjudicatorOutput.model_validate_json(_report(**{field: text}))
+    assert find_action_claims(report), text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The sign-in was blocked by Conditional Access.",
+        "Helpdesk reset the user's password under ticket HD-1042.",
+        "No containment steps were executed.",
+        "Containment steps were not executed; they await analyst approval.",
+        "Recommend disabling the account and revoking refresh tokens.",
+        "If confirmed, the analyst should execute the containment steps.",
+        "MFA requests were denied three times in 12 minutes.",
+    ],
+)
+def test_evidence_and_recommendations_are_not_action_claims(text):
+    from itdr_agent.adjudicator import find_action_claims
+
+    report = AdjudicatorOutput.model_validate_json(
+        _report(narrative=text, audit_notes=text)
+    )
+    assert find_action_claims(report) == [], text
+
+
+def test_action_claims_in_steps_and_actions_are_found():
+    from itdr_agent.adjudicator import find_action_claims
+
+    report = AdjudicatorOutput.model_validate_json(
+        _report(recommended_actions=["Containment actions were performed; notify the user"])
+    )
+    assert find_action_claims(report)
+
+
+def test_adjudicator_flags_but_does_not_reject_an_action_claim():
+    from itdr_agent.adjudicator import Adjudicator
+
+    llm = MockLLM(_report(audit_notes="Containment steps executed as per playbook."))
+    report = Adjudicator(llm).adjudicate(_dossier())
+    assert report.verdict is Verdict.COMPROMISED  # verdict untouched
+    assert report.action_claims == ["Containment steps executed"]
+    assert "executes nothing" in report.audit_notes
+    assert "human approval" in report.audit_notes
+
+
+def test_clean_report_has_no_action_claims():
+    from itdr_agent.adjudicator import Adjudicator
+
+    report = Adjudicator(MockLLM(_report())).adjudicate(_dossier())
+    assert report.action_claims == []
+    assert "executes nothing" not in report.audit_notes
+
+
+def test_model_cannot_fill_action_claims_itself():
+    """The flag is set by code; a model-supplied value is replaced."""
+    from itdr_agent.adjudicator import Adjudicator
+
+    raw = json.loads(_report())
+    raw["action_claims"] = ["something the model made up"]
+    report = Adjudicator(MockLLM(json.dumps(raw))).adjudicate(_dossier())
+    assert report.action_claims == []
+
+
+def test_system_prompt_says_recommend_only():
+    from itdr_agent.adjudicator import SYSTEM_PROMPT
+
+    text = SYSTEM_PROMPT.lower()
+    assert "you only recommend" in text
+    assert "never say" in text and "executed" in text
+    assert "human must approve" in text

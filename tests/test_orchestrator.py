@@ -335,3 +335,178 @@ def test_anonymization_blocks_non_synthetic_domain(tmp_path):
                 "userDisplayName": "Real Person",
             }
         )
+
+
+# --- Total timeout (PLAN Checkpoint 6: TIMEOUT_SECONDS, default 120) --------
+
+
+class FakeClock:
+    """Monotonic clock the test moves by hand."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class SlowInvestigator(FakeInvestigator):
+    """Moves the clock forward while it 'investigates'."""
+
+    def __init__(self, dossier, clock: FakeClock, seconds: float) -> None:
+        super().__init__(dossier)
+        self.clock, self.seconds = clock, seconds
+
+    def investigate(self, alert: dict) -> InvestigatorOutput:
+        self.clock.now += self.seconds
+        return super().investigate(alert)
+
+
+def test_timeout_error_is_a_timeout_error():
+    from itdr_agent.orchestrator import OrchestrationError, OrchestrationTimeoutError
+
+    # evaluate.classify_error records any TimeoutError as a "timeout" run
+    assert issubclass(OrchestrationTimeoutError, TimeoutError)
+    assert issubclass(OrchestrationTimeoutError, OrchestrationError)
+
+
+def test_total_timeout_stops_before_adjudication(tmp_path):
+    from itdr_agent.orchestrator import OrchestrationTimeoutError
+
+    clock = FakeClock()
+    inv = SlowInvestigator(_dossier(), clock, seconds=130)
+    llm = CompleteLLM([_report()])
+    audit = tmp_path / "audit.jsonl"
+    orch = Orchestrator(
+        inv, Adjudicator(llm), ScriptedReviewer(), audit_log=audit,
+        timeout_seconds=120, clock=clock,
+    )
+    with pytest.raises(OrchestrationTimeoutError):
+        orch.run({"id": "ALERT_001"}, run_id="r-timeout")
+    assert llm.calls == 0  # the Adjudicator was never called
+    events = _audit(audit)
+    assert [e["event"] for e in events] == ["timeout"]
+    assert events[0]["run_id"] == "r-timeout"
+    assert events[0]["stage"] == "adjudication"
+    assert events[0]["timeout_seconds"] == 120
+
+
+def test_no_timeout_when_within_budget(tmp_path):
+    clock = FakeClock()
+    inv = SlowInvestigator(_dossier(), clock, seconds=119)
+    llm = CompleteLLM([_report()])
+    orch = Orchestrator(
+        inv, Adjudicator(llm), ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl", timeout_seconds=120, clock=clock,
+    )
+    result = orch.run({"id": "ALERT_001"})
+    assert result.report.verdict is Verdict.COMPROMISED
+    assert llm.calls == 1
+
+
+def test_total_timeout_stops_before_readjudication(tmp_path):
+    from itdr_agent.orchestrator import OrchestrationTimeoutError
+
+    clock = FakeClock()
+
+    class ClockMovingLLM(CompleteLLM):
+        def complete(self, messages):
+            clock.now += 125  # the first Adjudicator call is slow
+            return super().complete(messages)
+
+    llm = ClockMovingLLM([_report(confidence=0.5), _report()])
+    reviewer = ScriptedReviewer(
+        answers=[AskUserResult(status="answered", answer="The activity is suspicious/malicious", choice_index=1)]
+    )
+    audit = tmp_path / "audit.jsonl"
+    orch = Orchestrator(
+        FakeInvestigator(_dossier()), Adjudicator(llm), reviewer,
+        audit_log=audit, timeout_seconds=120, clock=clock,
+    )
+    with pytest.raises(OrchestrationTimeoutError):
+        orch.run({"id": "ALERT_001"})
+    assert llm.calls == 1  # no second (re-)adjudication after the deadline
+    assert _audit(audit)[-1]["event"] == "timeout"
+    assert _audit(audit)[-1]["stage"] == "re_adjudication"
+
+
+def test_orchestrator_hands_its_deadline_to_the_investigator(tmp_path):
+    """A real Investigator stops between model turns once the deadline passes."""
+    from itdr_agent.investigator import Investigator
+    from itdr_agent.orchestrator import OrchestrationTimeoutError
+
+    clock = FakeClock()
+
+    class SlowToolLLM:
+        def __init__(self):
+            self.turns = 0
+
+        def next_action(self, messages):
+            self.turns += 1
+            clock.now += 70  # each model turn takes 70 s
+            return {"action": "tool", "tool": "get_user_profile",
+                    "arguments": {"upn": ALICE}}
+
+    tool_llm = SlowToolLLM()
+    inv = Investigator(tool_llm, tool_executor=lambda name, args: {"userPrincipalName": ALICE})
+    llm = CompleteLLM([_report()])
+    audit = tmp_path / "audit.jsonl"
+    orch = Orchestrator(
+        inv, Adjudicator(llm), ScriptedReviewer(), audit_log=audit,
+        timeout_seconds=120, clock=clock,
+    )
+    with pytest.raises(OrchestrationTimeoutError):
+        orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
+    assert tool_llm.turns == 2  # 70 s, 140 s → stops before a third turn
+    assert llm.calls == 0
+    assert _audit(audit)[-1]["stage"] == "investigation"
+
+
+# --- Action-claim guard (the agent recommends; it never acts) --------------
+
+
+def test_action_claim_is_logged_with_run_id(tmp_path):
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(),
+        [_report(audit_notes="Containment steps executed as per playbook.")],
+    )
+    result = orch.run({"id": "ALERT_001"}, run_id="r-claim")
+    assert result.report.action_claims  # flagged, not rejected
+    assert result.report.verdict is Verdict.COMPROMISED
+    claims = [e for e in _audit(audit) if e["event"] == "action_claim"]
+    assert len(claims) == 1
+    assert claims[0]["run_id"] == "r-claim"
+    assert claims[0]["claims"] == result.report.action_claims
+
+
+def test_analyst_think_time_does_not_count_toward_the_timeout(tmp_path):
+    """The 120 s budget is for the machine; a person answering takes what it takes."""
+    clock = FakeClock()
+
+    class SlowHuman(ScriptedReviewer):
+        def ask(self, question, options, allow_free_text=True):
+            clock.now += 500  # the analyst thinks for 500 s
+            return super().ask(question, options, allow_free_text)
+
+    reviewer = SlowHuman(
+        answers=[AskUserResult(status="answered", answer="The activity is suspicious/malicious", choice_index=1)]
+    )
+    llm = CompleteLLM([_report(confidence=0.5), _report()])
+    orch = Orchestrator(
+        FakeInvestigator(_dossier()), Adjudicator(llm), reviewer,
+        audit_log=tmp_path / "audit.jsonl", timeout_seconds=120, clock=clock,
+    )
+    result = orch.run({"id": "ALERT_001"})
+    assert llm.calls == 2  # the re-adjudication still ran
+    assert result.re_adjudications == 1
+
+
+def test_default_total_timeout_comes_from_config(tmp_path, monkeypatch):
+    from itdr_agent import config
+
+    monkeypatch.setattr(config, "TIMEOUT_SECONDS", 77)
+    orch = Orchestrator(
+        FakeInvestigator(_dossier()), Adjudicator(CompleteLLM([])),
+        ScriptedReviewer(), audit_log=tmp_path / "audit.jsonl",
+    )
+    assert orch.timeout_seconds == 77

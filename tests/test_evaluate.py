@@ -735,3 +735,49 @@ def test_combine_only_keeps_the_chosen_model(tmp_path):
     assert code == 0
     assert all(r["model"] == MODEL for r in _records(tmp_path / "final"))
     assert len(_records(tmp_path / "final")) == 30
+
+
+def test_live_runner_uses_the_total_timeout_not_the_request_timeout(tmp_path, monkeypatch):
+    """The 90 s cap is per request; the orchestrator's total is TIMEOUT_SECONDS (120)."""
+    seen = {}
+
+    class CapturingOrchestrator:
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+
+        def run(self, alert, run_id=None):
+            raise RuntimeError("not needed")
+
+    monkeypatch.setattr(evaluate, "Orchestrator", CapturingOrchestrator)
+    monkeypatch.setattr(evaluate, "make_openrouter_client", lambda key, timeout: object())
+    runner = evaluate.make_live_runner(
+        "sk-or-v1-test", MODEL, 90, tmp_path / "audit.jsonl", total_timeout=120
+    )
+    with pytest.raises(RuntimeError):
+        runner({"id": "ALERT_001"}, 1, "r1", object())
+    assert seen["timeout_seconds"] == 120
+
+
+def test_live_runner_total_timeout_defaults_to_config(tmp_path, monkeypatch):
+    seen = {}
+
+    class CapturingOrchestrator:
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+
+        def run(self, alert, run_id=None):
+            raise RuntimeError("not needed")
+
+    monkeypatch.setattr(evaluate, "Orchestrator", CapturingOrchestrator)
+    monkeypatch.setattr(evaluate, "make_openrouter_client", lambda key, timeout: object())
+    monkeypatch.setattr(evaluate.config, "TIMEOUT_SECONDS", 120)
+    runner = evaluate.make_live_runner("sk-or-v1-test", MODEL, 90, tmp_path / "audit.jsonl")
+    with pytest.raises(RuntimeError):
+        runner({"id": "ALERT_001"}, 1, "r1", object())
+    assert seen["timeout_seconds"] == 120
+
+
+def test_orchestration_timeout_is_recorded_as_a_timeout_run():
+    from itdr_agent.orchestrator import OrchestrationTimeoutError
+
+    assert evaluate.classify_error(OrchestrationTimeoutError("over 120 s")) == ("timeout", "record")
