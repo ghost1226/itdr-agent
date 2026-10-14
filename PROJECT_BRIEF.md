@@ -77,7 +77,7 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 - **The same alert can get a different answer.** At temperature 0, ALERT_006 (benign travel) came back INSUFFICIENT_DATA (confidence 0.55), then FALSE_POSITIVE (0.90), then FALSE_POSITIVE (0.70). Multi-run agreement is 91.7% so far [E1].
 - **The evaluated model is not the one first verified.** Checkpoint 5 was verified on Gemma 4 31B (free). Gemma was rate-limited by its provider on both smoke-test attempts, so the evaluation runs on Nemotron 3 Super (free) [P3]. OpenRouter documents that a 429 can come from the upstream provider [X1]. Free models can change or disappear, so these results may not be reproducible later.
 - **One model only.** No other model was evaluated, so there is no comparison across models.
-- **The code changed during the evaluation.** After 12 of Joe's 15 runs, a total timeout and an action-claim guard were added (commit `d0d6b15`) [P4]. Those 12 runs used the earlier code; the remaining runs use the new code. Neither change alters how a verdict is decided, but two things differ: a run that passes 120 seconds is now scored as failed (none of the first 12 took longer than 73 seconds [E1]), and the prompt gained one sentence ("You only recommend…"), which could change the model's wording in later runs [C2].
+- **The code changed during the evaluation.** After 12 of Joe's 15 runs, a total timeout and an action-claim guard were added (commit `d0d6b15`), then an unsafe-rollback guard (commit `1a83ccb`) [P4]. Those 12 runs used the earlier code; the remaining runs use the new code. Neither change alters how a verdict is decided, but two things differ: a run that passes 120 seconds is now scored as failed (none of the first 12 took longer than 73 seconds [E1]), and the prompt gained two rules ("You only recommend…" and never restoring an old password or MFA setup in a rollback), which could change the model's wording in later runs [C2].
 
 ### 7.3 Prompt injection
 
@@ -94,6 +94,7 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 
 - **The ask-the-analyst path is never measured.** During scoring, a scripted reviewer approves every containment step and cancels every question, so the one-question re-check never runs. The numbers show the agent alone [E2].
 - **The model claimed actions it never took.** In the first live run, the model wrote "Containment steps executed as per playbook" [P3]. The agent executes nothing: it recommends steps, and a person approves them. Since `d0d6b15`, the prompt forbids that wording and a code check flags it in the report and the audit log [T6]. The check matches patterns, so it can miss a reworded claim. An analyst still has to read the report.
+- **The model proposed an unsafe rollback.** In a live run on ALERT_001, a password-reset step's rollback was "temporarily revert the password to its previous value", which would hand back the password the attacker used [P8]. The schema only required that a rollback exist. Since `1a83ccb`, the prompt forbids restoring an old password or MFA setup, and a code check flags such a rollback, warns the analyst on that step, and logs it [T7]. It also matches patterns, so the analyst's review is still the real safeguard.
 
 ### 7.6 Cost and latency
 
@@ -120,12 +121,14 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 - **[T4]** `tests/test_investigator.py` (`test_tool_output_is_wrapped_as_untrusted_data`, `test_wrapper_cannot_be_broken_out_of`, `test_alert_wrapper_breakout_probe`, `test_alert_instruction_probe_stays_inside_wrapper`); `tests/test_adjudicator.py` (`test_dossier_is_wrapped_and_escaped`, `test_dossier_breakout_probe`); `tests/test_human.py::test_wrap_analyst_input_wraps_and_escapes`.
 - **[T5]** `itdr_agent/adjudicator.py`, `assert_mitre_claims_supported`; `tests/test_adjudicator.py::test_mitre_claims_must_be_supported`.
 - **[T6]** `tests/test_adjudicator.py` (action-claim tests), `tests/test_orchestrator.py::test_action_claim_is_logged_with_run_id`; commits `ccb1b61` / `d0d6b15`.
+- **[T7]** `tests/test_adjudicator.py` (unsafe-rollback tests), `tests/test_orchestrator.py::test_unsafe_rollback_is_shown_to_the_reviewer_and_logged`, `tests/test_human.py::test_cli_reviewer_prints_the_rollback_warning`; commits `658dbb1` / `1a83ccb`.
 - **[P1]** PROGRESS.md, "Microsoft Graph Schema Sources" (`networkLocationDetails` beta-only).
 - **[P2]** PROGRESS.md, "MITRE ATT&CK Checklist".
 - **[P3]** PROGRESS.md, "Eval model switched" and Open Problem 3; `eval/interruptions.jsonl`.
 - **[P4]** PROGRESS.md, "Checkpoint 7 fix 2" (mid-eval effect).
 - **[P5]** PROGRESS.md, Checkpoint 7 split (Joe: ALERT_001, 002, 003, 006, 009; partner: 004, 005, 007, 008, 010).
 - **[P6]** PROGRESS.md, Checkpoint 7 (budget, dry run) and Open Problem 7.
+- **[P8]** PROGRESS.md, "Checkpoint 7 fix 3" (the live ALERT_001 run, 2026-10-13).
 - **[X1]** OpenRouter, API rate limits: https://openrouter.ai/docs/api/reference/limits (checked 2026-10-13).
 
 ### Claims to verify (section 7)
@@ -152,6 +155,8 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 | Scripted reviewer cancels every question | E2 |
 | Model wrote "Containment steps executed as per playbook" | P3 |
 | Action-claim guard flags the wording | T6 |
+| Model proposed "revert the password to its previous value" as a rollback | P8 |
+| Unsafe-rollback guard flags, warns, and logs | T7 |
 | Free models: 20/min, 50/day, 1,000/day with 10+ credits | X1 |
 | 42.8 s average (26.4-72.6), 80 requests / 12 runs, ~10.9k in / 3.0k out tokens | E1 |
 | ~6 days for 30 runs; dry run 5, worst case 8 | P6 |
