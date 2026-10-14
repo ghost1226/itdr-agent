@@ -71,7 +71,8 @@ def test_page_loads_in_offline_mode_with_all_ten_alerts(audit):
     at = _app()
     assert at.radio(key="mode").value.startswith("Offline")
     options = at.selectbox(key="alert_id").options
-    assert [o for o in options] == [f"ALERT_{n:03d}" for n in range(1, 11)]
+    # AppTest returns the displayed labels ("ALERT_001  (user@contoso.com)")
+    assert [o.split()[0] for o in options] == [f"ALERT_{n:03d}" for n in range(1, 11)]
     assert "canned" in _page_text(at).lower()
 
 
