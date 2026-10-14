@@ -199,7 +199,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 1. ~~Smoke test first~~ DONE (passed on Nemotron): `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
 2. Then `python scripts/evaluate.py --live` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
 3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
-4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README. **Started 2026-10-13:** `PROJECT_BRIEF.md` has section 7 (Limits and risks, approved by Joe, every claim cited, Claims-to-verify table); sections 1-6 and 9 to write, 8 blocked on Joe's baseline. Refresh section 7's numbers when the eval finishes.
+4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README. **Started 2026-10-13:** `PROJECT_BRIEF.md` has section 7 (Limits and risks, approved by Joe, every claim cited, Claims-to-verify table); sections 1-6 and 9 added 2026-10-13 (approved by Joe; Microsoft comparison checked on Microsoft Learn: Entra ID Protection, Identity Risk Management Agent (preview; PLAN's "Risk Management agent"), Purview DLP Triage Agent); only 8 left, blocked on Joe's baseline. Refresh section 7's numbers when the eval finishes.
 
 ~~Open: the orchestrator's total timeout was never enforced.~~ **Fixed 2026-10-13** (`ccb1b61`/`d0d6b15`).
 
