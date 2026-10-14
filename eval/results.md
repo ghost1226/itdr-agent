@@ -1,6 +1,6 @@
 # ITDR Evaluation Results
 
-> **PARTIAL:** 12 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
+> **PARTIAL:** 15 of 30 runs complete. The evaluation resumes where it stopped; numbers will change.
 
 ## Method
 
@@ -9,24 +9,24 @@
 - **Reviewer:** a scripted reviewer approves every containment step and cancels every `ask_user` question. No human is in the loop during scoring, so the one-question re-adjudication path is never exercised.
 - **Labels:** `data/fixtures/ground_truth.jsonl`, read only by this script and the tests; the agents never see it.
 - **Limits:** at most 20 requests/minute and 45 requests/UTC day (free cap 50); a run starts only with room for its worst case (10 requests).
-- **Run days (UTC):** 2026-10-12, 2026-10-13.
+- **Run days (UTC):** 2026-10-12, 2026-10-13, 2026-10-14.
 
 ## Headline metrics
 
 | Metric | Value |
 |---|---|
-| Runs complete | 12 of 30 (0 failed) |
-| Exact verdict accuracy (primary; failed runs count as wrong) | 91.7% |
-| Exact verdict accuracy, runs that returned a verdict | 91.7% |
-| Majority-of-3 verdict accuracy (per alert) | 100.0% |
+| Runs complete | 15 of 30 (0 failed) |
+| Exact verdict accuracy (primary; failed runs count as wrong) | 73.3% |
+| Exact verdict accuracy, runs that returned a verdict | 73.3% |
+| Majority-of-3 verdict accuracy (per alert) | 80.0% |
 | Attack-vs-benign detection (8 labeled alerts) | 100.0% (12 runs) |
 | False positives (benign runs called COMPROMISED/SUSPICIOUS) | 0 of 3 |
 | MITRE precision | 100.0% (TP 9, FP 0) |
 | MITRE recall | 100.0% (FN 0) |
-| Multi-run agreement | 91.7% |
-| Model requests | 80 total |
-| Tokens in / out | 131179 / 35709 total; 10931.6 / 2975.8 per run |
-| Seconds | 514.0 total; 42.8 per run |
+| Multi-run agreement | 93.3% |
+| Model requests | 98 total |
+| Tokens in / out | 153562 / 42629 total; 10237.5 / 2841.9 per run |
+| Seconds | 625.1 total; 41.7 per run |
 
 ## Per alert
 
@@ -36,6 +36,7 @@
 | ALERT_002 | mfa_fatigue | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
 | ALERT_003 | anonymous_ip | COMPROMISED | COMPROMISED, COMPROMISED, COMPROMISED | COMPROMISED | yes |
 | ALERT_006 | benign_travel | FALSE_POSITIVE | INSUFFICIENT_DATA, FALSE_POSITIVE, FALSE_POSITIVE | FALSE_POSITIVE | yes |
+| ALERT_009 | thin_data | INSUFFICIENT_DATA | FALSE_POSITIVE, FALSE_POSITIVE, FALSE_POSITIVE | FALSE_POSITIVE | no |
 
 ## Per run
 
@@ -53,12 +54,18 @@
 | ALERT_006 | 1 | INSUFFICIENT_DATA | 0.55 | - | 6 | 9143/2715 | 42.0 | - |
 | ALERT_006 | 2 | FALSE_POSITIVE | 0.90 | - | 7 | 11503/3316 | 50.7 | - |
 | ALERT_006 | 3 | FALSE_POSITIVE | 0.70 | - | 8 | 17505/5056 | 72.6 | - |
+| ALERT_009 | 1 | FALSE_POSITIVE | 0.90 | - | 6 | 7269/2762 | 44.7 | - |
+| ALERT_009 | 2 | FALSE_POSITIVE | 0.92 | - | 6 | 7557/1862 | 35.9 | - |
+| ALERT_009 | 3 | FALSE_POSITIVE | 0.92 | - | 6 | 7557/2296 | 30.5 | - |
 
 ## Failure table
 
 | Alert | Run | What went wrong | Why |
 |---|---|---|---|
 | ALERT_006 | 1 | expected FALSE_POSITIVE, got INSUFFICIENT_DATA | Alert ALERT_006 generated; no MITRE technique evidence present; data gaps none. Sign-in history shows normal activity from a managed, compliant device with no risk flags; the observed location change from New York to London is consistent with legitimate travel and there are no indicators of compr... |
+| ALERT_009 | 1 | expected INSUFFICIENT_DATA, got FALSE_POSITIVE | Verdict based on lack of risk indicators, normal sign‑in patterns, and empty MITRE attack evidence in the dossier. The sign-in history shows two successful authentications for user05@contoso.com from a compliant, managed macOS device in New York, with no risk detections, no anomalous IP or locati... |
+| ALERT_009 | 2 | expected INSUFFICIENT_DATA, got FALSE_POSITIVE | Alert ALERT_009 triggered but evidence lacks any compromise indicators; treated as false positive. The sign-in history shows two successful authentications from known, compliant devices in New York with no risk detections, MFA not required but no anomalous indicators. No directory changes, no ris... |
+| ALERT_009 | 3 | expected INSUFFICIENT_DATA, got FALSE_POSITIVE | Alert ALERT_009 triggered but evidence shows normal sign‑ins from New York on a compliant macOS device with no risk indicators; no MITRE techniques observed. The sign-in history shows two successful authentications from known corporate locations and a compliant, managed device. No risk events, MF... |
 
 ## Interrupted attempts (retried in a later session)
 
