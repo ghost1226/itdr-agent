@@ -1,0 +1,2 @@
+# Optional: local web GUI (python -m streamlit run app.py). Not needed for the CLI or tests.
+streamlit==1.64.0
