@@ -41,6 +41,7 @@ class OpenRouterLLM:
             messages=messages,
             temperature=0,
             response_format={"type": "json_object"},
+            max_tokens=config.MAX_OUTPUT_TOKENS,
         )
         return json.loads(response.choices[0].message.content)
 

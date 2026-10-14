@@ -189,6 +189,7 @@ def _chat(client: Any, model: str, budget: RequestBudget, messages: list) -> str
         messages=messages,
         temperature=0,
         response_format={"type": "json_object"},
+        max_tokens=config.MAX_OUTPUT_TOKENS,
     )
     budget.add_usage(getattr(response, "usage", None))
     return response.choices[0].message.content or ""
