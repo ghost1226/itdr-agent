@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -89,3 +91,88 @@ def test_cli_reviewer_prints_no_warning_line_when_rollback_is_safe(monkeypatch, 
     monkeypatch.setattr("builtins.input", lambda prompt="": "approve")
     CliReviewer().review_step(0, "Disable the account", "Re-enable it")
     assert "WARNING" not in capsys.readouterr().out
+
+
+def _cli_inputs(monkeypatch, values):
+    """Feed ``values`` to ``input()`` in order."""
+    queue = iter(values)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(queue))
+
+
+def test_cli_reviewer_uppercase_approve_is_accepted(monkeypatch):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["  APPROVE  "])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "approve"
+
+
+def test_cli_reviewer_blank_does_not_approve(monkeypatch, capsys):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["", "reject"])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "reject"
+    assert "Please type approve, edit, or reject." in capsys.readouterr().out
+
+
+def test_cli_reviewer_typo_does_not_approve(monkeypatch, capsys):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["aprove", "approve"])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "approve"
+    assert "Please type approve, edit, or reject." in capsys.readouterr().out
+
+
+def test_cli_reviewer_valid_edit(monkeypatch):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["EDIT", "  Revoke all sessions  "])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "edit"
+    assert decision.edited_step == "Revoke all sessions"
+
+
+def test_cli_reviewer_valid_reject(monkeypatch):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, [" reject "])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "reject"
+
+
+def test_cli_reviewer_blank_edit_text_asks_again(monkeypatch, capsys):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["edit", "   ", "approve"])
+    decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+    assert decision.decision == "approve"
+    assert "Please type approve, edit, or reject." in capsys.readouterr().out
+
+
+def test_cli_reviewer_eof_raises_and_never_approves(monkeypatch):
+    from itdr_agent.human import CliReviewer, ReviewAbortedError
+
+    def end_of_input(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", end_of_input)
+    with pytest.raises(ReviewAbortedError):
+        CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+
+
+def test_cli_reviewer_eof_after_edit_raises(monkeypatch):
+    from itdr_agent.human import CliReviewer, ReviewAbortedError
+
+    calls = {"n": 0}
+
+    def edit_then_eof(prompt=""):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "edit"
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", edit_then_eof)
+    with pytest.raises(ReviewAbortedError):
+        CliReviewer().review_step(0, "Disable the account", "Re-enable it")
