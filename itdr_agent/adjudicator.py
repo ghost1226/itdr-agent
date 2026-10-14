@@ -65,6 +65,10 @@ SYSTEM_PROMPT = (
     "You only recommend. You never act: never say that any step was executed, "
     "applied, performed, or completed. Every containment step is a proposal "
     "that a human must approve before anyone carries it out.\n"
+    "A rollback must never restore a credential the attacker may know: never "
+    "restore an old password or a previous MFA setup. To undo a password reset, "
+    "issue a new temporary password; to undo an MFA reset, have the user "
+    "re-register after verifying their identity.\n"
 )
 
 # The agent executes nothing; it only recommends steps a human approves.
@@ -92,6 +96,29 @@ _ACTION_CLAIM_PATTERNS = [
 ]
 _NEGATION = re.compile(r"\b(?:no|not|never|without|nothing)\b", re.IGNORECASE)
 _SENTENCE_BREAK = re.compile(r"[.;!?]")
+
+# A rollback that restores the old password or MFA setup undoes the fix (the
+# attacker may know it); Nemotron proposed "revert the password to its previous
+# value" in Joe's live ALERT_001 run on 2026-10-13.
+_RB_VERB = r"\b(?:revert|restore|reinstate|roll(?:ing)?\s+back|return)\b"
+_RB_OLD = r"\b(?:previous|old|original|prior|former|earlier)\b"
+_RB_CRED = r"\b(?:password|credential|mfa|multi-factor|authentication\s+method|authenticator)"
+_UNSAFE_ROLLBACK_PATTERNS = [
+    re.compile(_RB_VERB + r"[^.;]{0,40}?" + _RB_OLD + r"[^.;]{0,25}?" + _RB_CRED, re.IGNORECASE),
+    re.compile(_RB_VERB + r"[^.;]{0,25}?" + _RB_CRED + r"\w*[^.;]{0,25}?" + _RB_OLD, re.IGNORECASE),
+]
+
+UNSAFE_ROLLBACK_WARNING = (
+    "This rollback would restore a credential or MFA setup the attacker may "
+    "know. Edit it before approving (a safe undo issues a new temporary "
+    "password or has the user re-register MFA after verifying identity)."
+)
+UNSAFE_ROLLBACK_NOTE = (
+    "Unsafe-rollback guard: the rollback for step(s) {steps} would restore a "
+    "credential or MFA setup the attacker may know. Don't approve it as "
+    "written; a safe undo issues a new temporary password or has the user "
+    "re-register MFA after verifying identity."
+)
 
 ACTION_CLAIM_NOTE = (
     "Action-claim guard: the report says actions were already taken ({claims}). "
@@ -176,6 +203,25 @@ def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
     return report
 
 
+def find_unsafe_rollbacks(report: AdjudicatorOutput) -> list[int]:
+    """Indexes of containment steps whose rollback restores a credential."""
+    return [
+        index
+        for index, step in enumerate(report.containment_steps)
+        if any(p.search(step.rollback) for p in _UNSAFE_ROLLBACK_PATTERNS)
+    ]
+
+
+def apply_unsafe_rollback_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
+    """Flag (never reject) unsafe rollbacks; the flag is set by code only."""
+    flagged = find_unsafe_rollbacks(report)
+    report.unsafe_rollbacks = flagged
+    if flagged:
+        note = UNSAFE_ROLLBACK_NOTE.format(steps=", ".join(str(i) for i in flagged))
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+    return report
+
+
 def invalid_mitre_claims(
     report: AdjudicatorOutput, dossier: InvestigatorOutput
 ) -> list[str]:
@@ -213,5 +259,6 @@ class Adjudicator:
         report = parse_adjudicator_output(raw)
         report = apply_confidence_guardrail(report)
         report = apply_action_claim_guard(report)
+        report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)
         return report

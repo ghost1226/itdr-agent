@@ -35,7 +35,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import config
-from .adjudicator import Adjudicator, UnsupportedMitreClaimError
+from .adjudicator import (
+    UNSAFE_ROLLBACK_WARNING,
+    Adjudicator,
+    UnsupportedMitreClaimError,
+    find_unsafe_rollbacks,
+)
 from .human import Reviewer
 from .investigator import InvestigationTimeoutError
 from .schemas import (
@@ -227,6 +232,16 @@ class Orchestrator:
                 },
             )
             raise
+        if report.unsafe_rollbacks:
+            self._append(
+                run_id,
+                {
+                    "event": "unsafe_rollback",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "step_indexes": report.unsafe_rollbacks,
+                },
+            )
         if report.action_claims:
             self._append(
                 run_id,
@@ -333,8 +348,12 @@ class Orchestrator:
         self, alert_id: str, report: AdjudicatorOutput, run_id: str
     ) -> AdjudicatorOutput:
         kept: list[ContainmentStep] = []
+        unsafe = set(report.unsafe_rollbacks)
         for index, step in enumerate(report.containment_steps):
-            decision = self.reviewer.review_step(index, step.step, step.rollback)
+            warning = UNSAFE_ROLLBACK_WARNING if index in unsafe else ""
+            decision = self.reviewer.review_step(
+                index, step.step, step.rollback, warning=warning
+            )
             final_step: str | None = step.step
             if decision.decision == "approve":
                 kept.append(step)
@@ -366,6 +385,7 @@ class Orchestrator:
                 },
             )
         report.containment_steps = kept
+        report.unsafe_rollbacks = find_unsafe_rollbacks(report)  # final indexes
         return report
 
     def _append(self, run_id: str, entry: dict[str, Any]) -> None:

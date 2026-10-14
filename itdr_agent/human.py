@@ -42,7 +42,7 @@ class ContainmentDecision:
 @runtime_checkable
 class Reviewer(Protocol):
     def review_step(
-        self, step_index: int, step: str, rollback: str
+        self, step_index: int, step: str, rollback: str, warning: str = ""
     ) -> ContainmentDecision: ...
 
     def ask(
@@ -67,7 +67,7 @@ class ScriptedReviewer:
         self.asked: list[str] = []
 
     def review_step(
-        self, step_index: int, step: str, rollback: str
+        self, step_index: int, step: str, rollback: str, warning: str = ""
     ) -> ContainmentDecision:
         self.reviewed.append(step_index)
         if self._decisions:
@@ -90,9 +90,11 @@ class CliReviewer:
     """Interactive reviewer for the CLI demo (not used in tests)."""
 
     def review_step(
-        self, step_index: int, step: str, rollback: str
+        self, step_index: int, step: str, rollback: str, warning: str = ""
     ) -> ContainmentDecision:
         print(f"\n[{step_index}] {step}\n    rollback: {rollback}")
+        if warning:
+            print(f"    WARNING: {warning}")
         choice = input("approve / edit / reject? ").strip().lower()
         if choice == "edit":
             return ContainmentDecision(

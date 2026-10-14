@@ -82,6 +82,9 @@ class AdjudicatorOutput(BaseModel):
     # Set by code (adjudicator.apply_action_claim_guard), never by the model:
     # phrases where the report claims an action was already taken.
     action_claims: list[str] = Field(default_factory=list)
+    # Set by code (adjudicator.apply_unsafe_rollback_guard), never by the model:
+    # indexes of containment steps whose rollback would restore a credential.
+    unsafe_rollbacks: list[int] = Field(default_factory=list)
 
 
 CONFIDENCE_THRESHOLD = 0.7
