@@ -2,7 +2,7 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. 293 tests.
+Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. Problem #22 fixed: `CliReviewer` no longer approves by default (`30d2503`/`2d56034`). 301 tests.
 
 ---
 
@@ -154,6 +154,12 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
   - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
   - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
+- ✅ Problem #22: CLI reviewer approved by default (2026-10-14).
+  - **Why:** `CliReviewer.review_step` returned `approve` for anything that was not exactly `edit`/`reject`, so a blank line or a typo approved a containment step with no human decision.
+  - **Red:** `30d2503` — 8 new cases in `tests/test_human.py`; `pytest` → **5 failed, 296 passed** (301 tests).
+  - **Green:** `2d56034` — **301 passed**.
+  - `CliReviewer.review_step` now accepts only `approve` / `edit` / `reject` (case- and space-insensitive). Anything else, including blank, prints `Please type approve, edit, or reject.` and re-asks; a blank edited step re-asks too. `EOFError` raises `ReviewAbortedError(RuntimeError, EOFError)` (never an approve) and stops the run.
+  - `ScriptedReviewer` and the GUI reviewer (`gui_run.py`) are unchanged.
 
 ## Microsoft Graph Schema Sources
 
@@ -396,3 +402,6 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `a7f74fb` — Eval day 3 (2026-10-14, Joe's half): ALERT_009 x3 on Nemotron
 - `8642520` — max-tokens: red — every model call must cap output tokens
 - `7fefa50` — max-tokens: green — config.MAX_OUTPUT_TOKENS=8192 on all 5 calls
+- `30d2503` — problem-22: red — CliReviewer must reject blank/typo, re-ask blank edit, and abort on EOF
+- `2d56034` — problem-22: green — CliReviewer accepts only approve/edit/reject, re-asks on blank/typo, aborts on EOF
+- `ada82b9` — max-tokens: update PROGRESS.md
