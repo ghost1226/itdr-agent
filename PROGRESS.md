@@ -2,7 +2,7 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. 254 tests.
+Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. 293 tests.
 
 ---
 
@@ -149,6 +149,11 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - `it.admin` remains only the privilege-escalation initiator, so it no longer appears in any benign user's window.
   - New tests: `test_benign_admin_role_target_is_an_ordinary_unique_user` and `test_no_cross_scenario_contamination` (no scenario user is initiator or target of another scenario's planted audit).
   - Same seed ⇒ byte-identical for all six files (SHA-256 verified); pip-audit: **No known vulnerabilities found**.
+- ✅ Output-token cap (2026-10-14, Joe's go):
+  - **Why:** no call set `max_tokens`, so OpenRouter reserves the model's whole context (~234k tokens) per request. Free models cost $0 so it never showed, but any key with credits or a spending limit gets 402 before the model runs (same error Pi hit on Kimi K2.6).
+  - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
+  - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
+  - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
 
 ## Microsoft Graph Schema Sources
 
@@ -251,6 +256,7 @@ Standing prevention rules distilled from the above:
 | Short-circuit only on critical gaps | Missing user profile or sign-in history stops the LLM. Missing audit trails alone does not. |
 | Deterministic errors via injection | No flaky tests. Tests pass explicit `injected_error` parameters. |
 | Integration tests separate from unit tests | Unit tests mock the LLM. Real-model runs are manual scripts, not CI. |
+| `MAX_OUTPUT_TOKENS = 8192` on every call | Uncapped requests reserve ~234k tokens and 402 on any key with a limit; 8192 covers the JSON reply plus Nemotron's reasoning (smoke run used ~3k output over 8 calls). |
 | Timeout default 120s | Free models are slow. Configurable via `.env`. |
 | Commit inside existing repo | `~/ai-agents-class` is already a git repo with a private GitHub remote. (Superseded 2026-10-12, see below.) |
 | Own repo: `~/itdr-agent` → private `ghost1226/itdr-agent` (2026-10-12) | Joe's partner runs half the evaluation and a review group will read the code; they get just this project. Full history kept (red/green commits are evidence). The old `~/ai-agents-class/itdr-agent` copy is frozen so the two never drift. |
@@ -388,3 +394,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `658dbb1` — checkpoint-7-fix3: red — unsafe-rollback tests
 - `1a83ccb` — checkpoint-7-fix3: green — unsafe-rollback guard, reviewer warning, audit line, prompt rule
 - `a7f74fb` — Eval day 3 (2026-10-14, Joe's half): ALERT_009 x3 on Nemotron
+- `8642520` — max-tokens: red — every model call must cap output tokens
+- `7fefa50` — max-tokens: green — config.MAX_OUTPUT_TOKENS=8192 on all 5 calls
