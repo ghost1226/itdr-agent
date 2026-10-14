@@ -204,3 +204,30 @@ def test_new_run_after_finishing(audit):
     at = _start(at, "ALERT_001")
     assert at.button(key="approve_0")
     assert len(_events(audit, "run")) == 1  # second run still waiting
+
+
+def test_slow_run_does_not_rerun_the_whole_page_while_working(audit, monkeypatch):
+    """A live model takes 30-60 s. Rerunning the page every poll made it flash."""
+    import time
+
+    import streamlit
+    from itdr_agent import sim_api
+
+    real = sim_api.get_user_profile
+
+    def slow_profile(*args, **kwargs):
+        time.sleep(1.5)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(sim_api, "get_user_profile", slow_profile)
+    reruns = []
+    real_rerun = streamlit.rerun
+
+    def counting_rerun(*args, **kwargs):
+        reruns.append(1)
+        return real_rerun(*args, **kwargs)
+
+    monkeypatch.setattr(streamlit, "rerun", counting_rerun)
+    at = _start(_app(), "ALERT_001")
+    assert at.button(key="approve_0")  # reached the step in the same click
+    assert len(reruns) <= 1, f"page reran {len(reruns)} times while working"
