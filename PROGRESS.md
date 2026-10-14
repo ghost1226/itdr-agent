@@ -118,6 +118,12 @@ Updated 2026-10-13: live evaluation in progress (Joe's half 12/15; ALERT_009 x3 
   - **Eval wiring bug fixed:** `make_live_runner` was passing the 90 s per-request cap as the orchestrator's total; it now passes `TIMEOUT_SECONDS` (120) via `total_timeout`.
   - **Action-claim guard (flag, never reject):** `find_action_claims` scans narrative, audit notes, recommended actions, and steps for claims that containment/remediation was executed/applied/performed/completed, or first-person "I/we disabled/reset/revoked…"; negated sentences ("No containment steps were executed") and evidence ("the sign-in was blocked", "Helpdesk reset the password") are not flagged. `apply_action_claim_guard` sets `AdjudicatorOutput.action_claims` (code-owned; a model-supplied value is replaced) and appends an audit note; the verdict is untouched. The orchestrator logs an `action_claim` audit line. System prompt: "You only recommend… never say that any step was executed… a human must approve."
   - **Mid-eval effect:** Joe's runs from 2026-10-12 (ALERT_001 x3, ALERT_002 x3) and 2026-10-13 (ALERT_003 x3, ALERT_006 x3) ran **before** this fix; ALERT_009 and any partner run after `git pull` run with it. Before the fix there was no total time cap (observed runs 26–73 s, so 120 s would not have cut any of them). The prompt rule may change wording in later runs; verdict scoring is unaffected.
+- ✅ Checkpoint 7 fix 3 (Joe: "fix now 1", 2026-10-13 night, mid-evaluation): unsafe-rollback guard.
+  - Found in Joe's live CLI run (ALERT_001, Nemotron): step 0's rollback said "temporarily revert the password to its previous value". You can't restore an old Entra password, and going back to the password the attacker used undoes the fix. The schema only required a non-empty rollback.
+  - **Red:** `658dbb1` — tests only; `pytest` → **16 failed, 238 passed** (one new guard test, no warning on a safe rollback, passes on the old code by design).
+  - **Green:** `1a83ccb` — **254 passed**. Dry run unchanged; offline demo unchanged; 0 unsafe-rollback flags on the canned sample reports.
+  - `find_unsafe_rollbacks` flags a rollback that reverts/restores/reinstates/rolls back to a previous/old/original/prior password, credential, MFA setup, or authentication method (either word order); "restore the user's previous access rights" and "issue a new temporary password" are not flagged. `apply_unsafe_rollback_guard` sets `AdjudicatorOutput.unsafe_rollbacks` (step indexes; code-owned, a model value is replaced) and appends an audit note; nothing is removed and the verdict is untouched. The orchestrator logs an `unsafe_rollback` audit line, passes `warning=` to `review_step` for that step (the CLI prints `WARNING: ...`; `Reviewer.review_step` gained an optional `warning` argument), and recomputes the indexes after review. Prompt rule: never restore an old password or previous MFA setup; issue a new temporary password / re-register MFA instead.
+  - **Mid-eval effect:** one more prompt sentence before ALERT_009 and the partner's runs; same note as fix 2.
 - ✅ Checkpoint 1b: benign alerts, thin/unknown alerts, separate ground truth, graph-field-check.
   - **Red:** `d49281d` — tests only; `pytest` → **13 failed, 5 errors, 78 passed** (96 tests).
   - **Green:** `3e70589` — **96 passed**; fixtures regenerated (users 29, sign-ins 130, audits 53, alerts 10, ground_truth 10).
@@ -313,7 +319,8 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 3. **Eval model ≠ Checkpoint 5 model.** Gemma 4 31B (free) was rate-limited upstream; the evaluation runs on Nemotron 3 Super (free). Free models can change or vanish, so results may not reproduce later. Say so in PROJECT_BRIEF "Limits and risks".
 4. ~~**Model overclaims actions.**~~ **Fixed 2026-10-13** (`d0d6b15`): recommend-only prompt rule + action-claim guard that flags (does not reject) and logs `action_claim`. Runs before the fix are not re-scored.
 5. ~~**Orchestrator total timeout not enforced.**~~ **Fixed 2026-10-13** (`d0d6b15`), including the eval passing 90 s instead of 120 s.
-8. **Mid-eval code change.** 12 of Joe's runs predate fix 2; say so in PROJECT_BRIEF.
+8. **Mid-eval code change.** 12 of Joe's runs predate fixes 2 and 3; say so in PROJECT_BRIEF.
+9. ~~**Unsafe rollbacks.**~~ **Fixed 2026-10-13** (fix 3): flagged, warned, logged; still pattern-based, so a reworded unsafe rollback can slip through.
 6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
 
@@ -376,3 +383,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `3c65367` — Eval day 2 (2026-10-13, Joe's half): ALERT_003 x3, ALERT_006 x3 on Nemotron
 - `ccb1b61` — checkpoint-7-fix2: red — total timeout + action-claim tests
 - `d0d6b15` — checkpoint-7-fix2: green — total timeout enforced, action-claim guard, recommend-only prompt
+- `658dbb1` — checkpoint-7-fix3: red — unsafe-rollback tests
+- `1a83ccb` — checkpoint-7-fix3: green — unsafe-rollback guard, reviewer warning, audit line, prompt rule
