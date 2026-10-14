@@ -328,3 +328,77 @@ def test_system_prompt_says_recommend_only():
     assert "you only recommend" in text
     assert "never say" in text and "executed" in text
     assert "human must approve" in text
+
+
+# --- Unsafe-rollback guard: a rollback must never restore a credential -----
+
+
+@pytest.mark.parametrize(
+    "rollback",
+    [
+        "If the reset causes authentication disruption, temporarily revert the password to its previous value via an admin-initiated reset.",
+        "Restore the user's old password if they get locked out.",
+        "If MFA re-enrollment fails, restore the previous MFA configuration through the admin console.",
+        "Reinstate the original authentication methods.",
+        "Roll back to the prior credentials.",
+    ],
+)
+def test_unsafe_rollbacks_are_found(rollback):
+    from itdr_agent.adjudicator import find_unsafe_rollbacks
+
+    report = AdjudicatorOutput.model_validate_json(
+        _report(containment_steps=[{"step": "Reset the password", "rollback": rollback}])
+    )
+    assert find_unsafe_rollbacks(report) == [0], rollback
+
+
+@pytest.mark.parametrize(
+    "rollback",
+    [
+        "Re-enable the account if the activity is confirmed benign.",
+        "Remove the block rule to restore the user's previous access rights.",
+        "Issue a new temporary password and require a change at next sign-in.",
+        "Help the user register a new MFA method after verifying their identity.",
+        "Re-enable after review",
+    ],
+)
+def test_safe_rollbacks_are_not_flagged(rollback):
+    from itdr_agent.adjudicator import find_unsafe_rollbacks
+
+    report = AdjudicatorOutput.model_validate_json(
+        _report(containment_steps=[{"step": "Reset the password", "rollback": rollback}])
+    )
+    assert find_unsafe_rollbacks(report) == [], rollback
+
+
+def test_adjudicator_flags_but_does_not_reject_an_unsafe_rollback():
+    from itdr_agent.adjudicator import Adjudicator
+
+    steps = [
+        {"step": "Revoke refresh tokens", "rollback": "Re-enable after review"},
+        {"step": "Force password reset", "rollback": "Revert the password to its previous value."},
+    ]
+    report = Adjudicator(MockLLM(_report(containment_steps=steps))).adjudicate(_dossier())
+    assert report.verdict is Verdict.COMPROMISED
+    assert len(report.containment_steps) == 2  # nothing removed
+    assert report.unsafe_rollbacks == [1]
+    assert "rollback" in report.audit_notes.lower()
+    assert "credential" in report.audit_notes.lower()
+
+
+def test_model_cannot_fill_unsafe_rollbacks_itself():
+    from itdr_agent.adjudicator import Adjudicator
+
+    raw = json.loads(_report())
+    raw["unsafe_rollbacks"] = [0]
+    report = Adjudicator(MockLLM(json.dumps(raw))).adjudicate(_dossier())
+    assert report.unsafe_rollbacks == []
+
+
+def test_system_prompt_forbids_restoring_credentials_in_a_rollback():
+    from itdr_agent.adjudicator import SYSTEM_PROMPT
+
+    text = SYSTEM_PROMPT.lower()
+    assert "never restore" in text
+    assert "old password" in text
+    assert "new temporary password" in text

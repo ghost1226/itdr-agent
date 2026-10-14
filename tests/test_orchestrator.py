@@ -510,3 +510,35 @@ def test_default_total_timeout_comes_from_config(tmp_path, monkeypatch):
         ScriptedReviewer(), audit_log=tmp_path / "audit.jsonl",
     )
     assert orch.timeout_seconds == 77
+
+
+# --- Unsafe-rollback warning reaches the reviewer and the audit log --------
+
+
+class WarningRecorder(ScriptedReviewer):
+    def __init__(self):
+        super().__init__()
+        self.warnings: dict[int, str] = {}
+
+    def review_step(self, step_index, step, rollback, warning=""):
+        self.warnings[step_index] = warning
+        return super().review_step(step_index, step, rollback)
+
+
+def test_unsafe_rollback_is_shown_to_the_reviewer_and_logged(tmp_path):
+    steps = [
+        {"step": "Disable the account", "rollback": "Re-enable if benign"},
+        {"step": "Force password reset", "rollback": "Revert the password to its previous value."},
+    ]
+    reviewer = WarningRecorder()
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(), [_report(containment_steps=steps)], reviewer=reviewer
+    )
+    result = orch.run({"id": "ALERT_001"}, run_id="r-rb")
+    assert reviewer.warnings[0] == ""
+    assert "credential" in reviewer.warnings[1].lower()
+    flagged = [e for e in _audit(audit) if e["event"] == "unsafe_rollback"]
+    assert len(flagged) == 1
+    assert flagged[0]["run_id"] == "r-rb"
+    assert flagged[0]["step_indexes"] == [1]
+    assert result.report.unsafe_rollbacks == [1]
