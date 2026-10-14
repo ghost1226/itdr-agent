@@ -2,13 +2,13 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-13: live evaluation in progress (Joe's half 12/15; ALERT_009 x3 left). Checkpoint 7 fix 2 landed: total timeout enforced + action-claim guard (237 tests).
+Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. 254 tests.
 
 ---
 
 ## Current Checkpoint
 
-**Checkpoint 7 — live evaluation running (split 15/15 with Joe's partner). Joe's half: 12 of 15 runs done (day 1 `7990b79`, day 2 `3c65367`). Fix 2 landed mid-eval (`ccb1b61`/`d0d6b15`); see below for which runs came before it.**
+**Checkpoint 7 — live evaluation running (split 15/15 with Joe's partner). Joe's half: 15 of 15 runs done (day 1 `7990b79`, day 2 `3c65367`, day 3 `a7f74fb`). Partner's half pending, then `--combine eval eval/partner`. Fixes 2 and 3 landed mid-eval; see below for which runs came before them. README.md done (Final Step); refresh its eval section after the combine.**
 
 ## What's Done
 
@@ -320,6 +320,8 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 4. ~~**Model overclaims actions.**~~ **Fixed 2026-10-13** (`d0d6b15`): recommend-only prompt rule + action-claim guard that flags (does not reject) and logs `action_claim`. Runs before the fix are not re-scored.
 5. ~~**Orchestrator total timeout not enforced.**~~ **Fixed 2026-10-13** (`d0d6b15`), including the eval passing 90 s instead of 120 s.
 8. **Mid-eval code change.** 12 of Joe's runs predate fixes 2 and 3; say so in PROJECT_BRIEF.
+10. **Confidently wrong on thin data (2026-10-14).** ALERT_009 (expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90-0.92 in all 3 runs: missing evidence read as benign, so the 0.7 guardrail and the one question never fired. No code change mid-eval (Joe, 2026-10-14); any fix comes after the eval, with ALERT_009 re-run as a separate after-fix row. Say so in PROJECT_BRIEF.
+11. **Model selection is inconsistent.** The CLI and eval read `EVAL_MODEL`, `scripts/run_investigator_live.py` requires `OPENROUTER_MODEL` (not in `.env.example`), `scripts/run_adjudicator_live.py` takes an argument. README documents each as is; unifying them is Joe's call.
 9. ~~**Unsafe rollbacks.**~~ **Fixed 2026-10-13** (fix 3): flagged, warned, logged; still pattern-based, so a reworded unsafe rollback can slip through.
 6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
@@ -385,3 +387,4 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `d0d6b15` — checkpoint-7-fix2: green — total timeout enforced, action-claim guard, recommend-only prompt
 - `658dbb1` — checkpoint-7-fix3: red — unsafe-rollback tests
 - `1a83ccb` — checkpoint-7-fix3: green — unsafe-rollback guard, reviewer warning, audit line, prompt rule
+- `a7f74fb` — Eval day 3 (2026-10-14, Joe's half): ALERT_009 x3 on Nemotron
