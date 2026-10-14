@@ -294,15 +294,22 @@ def main() -> None:
     if run is None:
         st.info("Pick an alert in the sidebar and press Run investigation.")
         return
-    status = run.wait(POLL_SECONDS)
     st.caption(f"Alert {run.alert['id']} for {run.alert['userPrincipalName']}")
     if st.session_state.get("flash"):
         st.error(st.session_state["flash"])
-    _tool_calls(run)
+    status = run.wait(POLL_SECONDS)
     if status == "running":
-        st.caption("Working...")
-        st.rerun()
-    elif status == "question":
+        # Update only the tool-call list in place while the model works; a
+        # full-page rerun on every poll made the page flash (30-60 s live).
+        live = st.empty()
+        with st.spinner("The agent is working..."):
+            while status == "running":
+                with live.container():
+                    _tool_calls(run)
+                status = run.wait(POLL_SECONDS)
+        st.rerun()  # once: draw the question, the step, or the report
+    _tool_calls(run)
+    if status == "question":
         _question(run)
     elif status == "review":
         _review(run)
