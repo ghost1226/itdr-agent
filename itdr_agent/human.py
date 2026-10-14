@@ -14,6 +14,15 @@ from typing import Any, Protocol, runtime_checkable
 CANCELLED_ANSWER = "no decision has been supplied"
 
 
+class ReviewAbortedError(RuntimeError, EOFError):
+    """The analyst's input ended before a valid containment decision.
+
+    Raised instead of fall-through-to-approve so closed stdin can never
+    silently approve a containment step. Inherits from ``EOFError`` so callers
+    that already handle end-of-input still catch it.
+    """
+
+
 @dataclass(frozen=True)
 class AskUserResult:
     status: str  # "answered" | "cancelled"
@@ -87,7 +96,16 @@ class ScriptedReviewer:
 
 
 class CliReviewer:
-    """Interactive reviewer for the CLI demo (not used in tests)."""
+    """Interactive reviewer for the CLI (tests inject ``input()``).
+
+    Accepts only ``approve`` / ``edit`` / ``reject`` (case- and
+    space-insensitive). Anything else, including a blank line, re-asks. A
+    blank edit re-asks too. EOF before a valid answer raises
+    :class:`ReviewAbortedError` and never approves.
+    """
+
+    PROMPT = "approve / edit / reject? "
+    INVALID = "Please type approve, edit, or reject."
 
     def review_step(
         self, step_index: int, step: str, rollback: str, warning: str = ""
@@ -95,16 +113,35 @@ class CliReviewer:
         print(f"\n[{step_index}] {step}\n    rollback: {rollback}")
         if warning:
             print(f"    WARNING: {warning}")
-        choice = input("approve / edit / reject? ").strip().lower()
-        if choice == "edit":
-            return ContainmentDecision(
-                decision="edit", edited_step=input("new step: ").strip()
-            )
-        if choice == "reject":
-            return ContainmentDecision(
-                decision="reject", reason="analyst rejected"
-            )
-        return ContainmentDecision(decision="approve")
+        while True:
+            choice = self._read_choice()
+            if choice == "approve":
+                return ContainmentDecision(decision="approve")
+            if choice == "reject":
+                return ContainmentDecision(decision="reject", reason="analyst rejected")
+            if choice == "edit":
+                edited = self._read_edit()
+                if edited:
+                    return ContainmentDecision(decision="edit", edited_step=edited)
+            print(self.INVALID)
+
+    @classmethod
+    def _read_choice(cls) -> str:
+        try:
+            return input(cls.PROMPT).strip().lower()
+        except EOFError as exc:
+            raise ReviewAbortedError(
+                "input ended before an approve/edit/reject decision"
+            ) from exc
+
+    @classmethod
+    def _read_edit(cls) -> str:
+        try:
+            return input("new step: ").strip()
+        except EOFError as exc:
+            raise ReviewAbortedError(
+                "input ended before the edited step was supplied"
+            ) from exc
 
     def ask(
         self,
