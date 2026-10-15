@@ -31,6 +31,10 @@ SEVERITY_BARS: dict[str, str] = {
 
 CONCLUSIONS: dict[str, str] = {
     "COMPROMISED": "This appears to be likely account compromise.",
+    "SUSPICIOUS": (
+        "This appears to be suspicious activity (possible credential "
+        "exposure); verify with the user and monitor."
+    ),
     "FALSE_POSITIVE": "This appears to be a false positive.",
     "INSUFFICIENT_DATA": (
         "Not enough data to decide; escalate for manual review."
