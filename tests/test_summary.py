@@ -276,3 +276,24 @@ def test_incident_note_no_action_required():
     )
     assert "No action required" in note
     assert "Continue monitoring" in note
+
+
+def test_incident_note_suspicious_conclusion():
+    note = incident_note(
+        _alert(),
+        _result(verdict="SUSPICIOUS", confidence=0.75, steps=[]),
+    )
+    assert (
+        "Conclusion: This appears to be suspicious activity (possible "
+        "credential exposure); verify with the user and monitor. Stage: "
+    ) in note
+
+
+def test_every_verdict_has_a_conclusion():
+    from itdr_agent.schemas import Verdict
+
+    for verdict in Verdict:
+        note = incident_note(
+            _alert(), _result(verdict=verdict.value, confidence=0.75, steps=[])
+        )
+        assert "Conclusion:  Stage" not in note, verdict
