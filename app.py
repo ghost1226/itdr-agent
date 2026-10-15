@@ -35,6 +35,13 @@ from itdr_agent.fixture_store import get_store  # noqa: E402
 from itdr_agent.gui_run import GuiRun  # noqa: E402
 from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E402
+from itdr_agent.summary import (  # noqa: E402
+    incident_note,
+    severity,
+    short_summary,
+    stage,
+    what,
+)
 
 OFFLINE = "Offline demo (no key, no model)"
 LIVE = "Live (OpenRouter, your own key)"
@@ -104,7 +111,9 @@ def _start(mode: str, model: str) -> None:
         if key.startswith(WIDGET_PREFIXES):
             del st.session_state[key]
     st.session_state.pop("flash", None)
-    alert_id = st.session_state["alert_id"]
+    alert_id = (
+        st.session_state.get("selected_alert") or st.session_state["alert_id"]
+    )
     audit = _audit_path()
     if mode == LIVE:
         build = _live_builder(model, audit)
@@ -279,6 +288,9 @@ def _report(run: GuiRun) -> None:
     result = run.result
     report = result.report
     st.subheader("Report")
+    # Ready-to-paste note; st.code has a copy button. The model narrative is
+    # inside it, so it stays a code block rather than rendered markdown.
+    st.code(incident_note(run.alert, result), language="text")
     st.text(f"Verdict: {report.verdict.value}    Confidence: {report.confidence:.2f}")
     if result.short_circuited:
         st.info("Critical data gap: the model was not called.")
@@ -315,15 +327,83 @@ def _report(run: GuiRun) -> None:
     st.code("\n".join(lines) or "no audit lines found", language="json")
 
 
-def main() -> None:
-    st.set_page_config(page_title="ITDR Agent", layout="wide")
-    _sidebar()
-    st.title("Identity incident review")
-    run: GuiRun | None = st.session_state.get("run")
-    if run is None:
-        st.info("Pick an alert in the sidebar and press Run investigation.")
-        return
+# --- feature 3: incident queue home ----------------------------------------
+
+
+def _home() -> None:
+    """The incident queue: count, search, severity/status filters, table."""
+    st.title("Identity incident queue")
+    alerts = list(_alerts().values())
+    statuses = st.session_state.setdefault("statuses", {})
+    search = st.text_input("Search by name, user, or ID", key="queue_search")
+    severity_filter = st.multiselect(
+        "Severity", ["High", "Medium", "Low", "None"], key="queue_severity"
+    )
+    status_filter = st.multiselect(
+        "Status", ["Not started", "Waiting on you", "Closed"], key="queue_status"
+    )
+    rows: list[dict[str, str]] = []
+    needle = (search or "").strip().lower()
+    for alert in alerts:
+        name = what(alert)
+        sev = severity(alert)
+        run_status = statuses.get(alert["id"], "Not started")
+        haystack = f"{name} {alert['userPrincipalName']} {alert['id']}".lower()
+        if needle and needle not in haystack:
+            continue
+        if severity_filter and sev.rsplit(" ", 1)[-1] not in severity_filter:
+            continue
+        if status_filter and not any(
+            run_status.startswith(prefix) for prefix in status_filter
+        ):
+            continue
+        rows.append(
+            {
+                "Name": name,
+                "Alert ID": alert["id"],
+                "Severity": sev,
+                "Stage": stage(alert),
+                "Status": run_status,
+            }
+        )
+    st.markdown(f"**{len(rows)} alert{'s' if len(rows) != 1 else ''}**")
+    event = st.dataframe(
+        rows,
+        key="queue",
+        on_select="rerun",
+        selection_mode="single-row",
+        hide_index=True,
+    )
+    if event.selection.rows:
+        selected = rows[event.selection.rows[0]]["Alert ID"]
+        # Set the sidebar alert before _sidebar() creates the selectbox
+        # widget; Streamlit forbids changing a widget key after creation.
+        st.session_state["selected_alert"] = selected
+        st.session_state["alert_id"] = selected
+        st.rerun()
+
+
+def _record_status(run: GuiRun, status: str) -> None:
+    statuses = st.session_state.setdefault("statuses", {})
+    if status in ("question", "review"):
+        statuses[run.alert["id"]] = "Waiting on you"
+    elif status == "done":
+        statuses[run.alert["id"]] = f"Closed: {run.result.report.verdict.value}"
+    elif status == "error":
+        statuses[run.alert["id"]] = "Closed: ERROR"
+
+
+def _back_to_queue() -> bool:
+    return st.button("Back to queue", key="back_to_queue")
+
+
+def _run_page(run: GuiRun) -> None:
     st.caption(f"Alert {run.alert['id']} for {run.alert['userPrincipalName']}")
+    st.text(short_summary(run.alert))
+    if _back_to_queue():
+        st.session_state.pop("run", None)
+        st.session_state.pop("selected_alert", None)
+        st.rerun()
     if st.session_state.get("flash"):
         st.error(st.session_state["flash"])
     status = run.wait(POLL_SECONDS)
@@ -337,6 +417,7 @@ def main() -> None:
                     _tool_calls(run)
                 status = run.wait(POLL_SECONDS)
         st.rerun()  # once: draw the question, the step, or the report
+    _record_status(run, status)
     _tool_calls(run)
     if status == "question":
         _question(run)
@@ -346,6 +427,33 @@ def main() -> None:
         st.error(f"The run stopped: {run.error}")
     elif status == "done":
         _report(run)
+
+
+def _selected_page(alert: dict) -> None:
+    st.text(short_summary(alert))
+    st.info("Press Run investigation in the sidebar to start.")
+    if _back_to_queue():
+        st.session_state.pop("selected_alert", None)
+        st.rerun()
+
+
+def main() -> None:
+    st.set_page_config(page_title="ITDR Agent", layout="wide")
+    run: GuiRun | None = st.session_state.get("run")
+    selected: str | None = st.session_state.get("selected_alert")
+    on_home = run is None and selected is None
+    if on_home:
+        # Draw the queue first so a row selection can set the sidebar alert
+        # before the selectbox widget is created.
+        _home()
+    _sidebar()
+    if on_home:
+        return
+    st.title("Identity incident review")
+    if run is None:
+        _selected_page(_alerts()[selected])
+    else:
+        _run_page(run)
 
 
 main()
