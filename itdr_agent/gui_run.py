@@ -48,6 +48,10 @@ class GuiRun:
         self.tool_calls: list[dict[str, Any]] = []
         self.result: Any = None
         self.error: str | None = None
+        # Pre-decision report summary (feature 1): stored by show_report and
+        # refreshed after a re-adjudication.
+        self.shown_report: Any = None
+        self.shown_dossier: Any = None
 
     # --- page side ---------------------------------------------------------
 
@@ -118,6 +122,13 @@ class GuiRun:
             )
 
     # --- Reviewer protocol (worker side) -----------------------------------
+
+    def show_report(self, report: Any, dossier: Any) -> None:
+        """Store the verdict so the page can show it before the analyst decides."""
+        with self._cond:
+            self.shown_report = report
+            self.shown_dossier = dossier
+            self._cond.notify_all()
 
     def ask(
         self,

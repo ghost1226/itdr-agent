@@ -159,11 +159,12 @@ class Orchestrator:
             report = self._adjudicate(dossier, run_id)  # logs+raises on bad MITRE
             llm_called = True
             if self._should_ask(report):
+                self._show_report(report, dossier)
                 report = self._ask_and_maybe_readjudicate(
                     alert_id, dossier, report, run_id
                 )
 
-        report = self._review_containment(alert_id, report, run_id)
+        report = self._review_containment(alert_id, dossier, report, run_id)
         report = apply_confidence_guardrail(report)
 
         self._append(
@@ -253,6 +254,16 @@ class Orchestrator:
                 },
             )
         return report
+
+    def _show_report(self, report: AdjudicatorOutput, dossier: InvestigatorOutput) -> None:
+        """Show the verdict before the analyst decides, if the reviewer can.
+
+        Optional hook: ``ScriptedReviewer`` has no ``show_report``, so the
+        evaluation path is a no-op and its audit lines are unchanged.
+        """
+        show = getattr(self.reviewer, "show_report", None)
+        if callable(show):
+            show(report, dossier)
 
     @staticmethod
     def _should_ask(report: AdjudicatorOutput) -> bool:
@@ -345,8 +356,14 @@ class Orchestrator:
         return new_report
 
     def _review_containment(
-        self, alert_id: str, report: AdjudicatorOutput, run_id: str
+        self,
+        alert_id: str,
+        dossier: InvestigatorOutput,
+        report: AdjudicatorOutput,
+        run_id: str,
     ) -> AdjudicatorOutput:
+        if report.containment_steps:
+            self._show_report(report, dossier)  # refreshed after re-adjudication
         kept: list[ContainmentStep] = []
         unsafe = set(report.unsafe_rollbacks)
         for index, step in enumerate(report.containment_steps):

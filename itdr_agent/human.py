@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from .summary import report_summary_lines
+
 CANCELLED_ANSWER = "no decision has been supplied"
 
 
@@ -106,6 +108,10 @@ class CliReviewer:
 
     PROMPT = "approve / edit / reject? "
     INVALID = "Please type approve, edit, or reject."
+
+    def show_report(self, report: Any, dossier: Any) -> None:
+        """Print the verdict summary before the analyst decides (feature 1)."""
+        print("\n".join(report_summary_lines(report, dossier)))
 
     def review_step(
         self, step_index: int, step: str, rollback: str, warning: str = ""

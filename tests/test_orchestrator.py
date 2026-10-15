@@ -604,7 +604,10 @@ def test_show_report_called_before_question_and_refreshed_after_readjudication(
         reviewer=reviewer,
     )
     orch.run({"id": "ALERT_009", "userPrincipalName": ALICE})
-    assert reviewer.shown[0] == ("SUSPICIOUS", 0.5, "ALERT_009")
+    # The confidence guardrail coerces the 0.5 SUSPICIOUS report before it is
+    # shown, so the question screen already reads INSUFFICIENT_DATA; the
+    # re-adjudicated report refreshes it to COMPROMISED.
+    assert reviewer.shown[0] == ("INSUFFICIENT_DATA", 0.5, "ALERT_009")
     assert reviewer.shown[-1] == ("COMPROMISED", 0.9, "ALERT_009")
     assert len(reviewer.shown) == 2
 

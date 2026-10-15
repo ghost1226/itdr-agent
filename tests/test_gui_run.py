@@ -402,7 +402,8 @@ def test_show_report_is_stored_before_the_question_and_refreshed(tmp_path):
     run.start()
     run.wait(WAIT)
     assert run.status == "question"
-    assert run.shown_report.verdict.value == "SUSPICIOUS"
+    # The confidence guardrail coerces the 0.5 SUSPICIOUS report first.
+    assert run.shown_report.verdict.value == "INSUFFICIENT_DATA"
     run.answer(choice_index=1)
     run.wait(WAIT)
     assert run.shown_report.verdict.value == "COMPROMISED"

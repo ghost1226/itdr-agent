@@ -204,7 +204,35 @@ def _tool_calls(run: GuiRun) -> None:
     st.text("\n".join(lines))
 
 
+def _report_summary(run: GuiRun) -> None:
+    """Show the verdict before the analyst decides (feature 1).
+
+    Uses only code-owned report fields plus the dossier's evidence ids. The
+    model narrative goes through st.text, never markdown.
+    """
+    report = run.shown_report
+    dossier = run.shown_dossier
+    if report is None:
+        return
+    with st.container(border=True):
+        st.markdown(
+            f"**Verdict: {report.verdict.value}**  ·  confidence "
+            f"{report.confidence:.2f}"
+        )
+        st.text(report.narrative)
+        evidence = dossier.mitre_attack_evidence if dossier is not None else {}
+        techniques = report.mitre_techniques_observed or []
+        st.text(
+            "\n".join(
+                f"{t}: evidence {', '.join(evidence.get(t, []))}"
+                for t in techniques
+            )
+            or "MITRE ATT&CK techniques: none"
+        )
+
+
 def _question(run: GuiRun) -> None:
+    _report_summary(run)
     pending = run.pending
     st.subheader("The agent has one question for you")
     st.text(pending["question"])
@@ -225,6 +253,7 @@ def _question(run: GuiRun) -> None:
 
 
 def _review(run: GuiRun) -> None:
+    _report_summary(run)
     pending = run.pending
     index = pending["index"]
     st.subheader(f"Containment step {index + 1}: your decision")
