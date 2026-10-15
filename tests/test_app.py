@@ -231,3 +231,24 @@ def test_slow_run_does_not_rerun_the_whole_page_while_working(audit, monkeypatch
     at = _start(_app(), "ALERT_001")
     assert at.button(key="approve_0")  # reached the step in the same click
     assert len(reruns) <= 1, f"page reran {len(reruns)} times while working"
+
+
+# --- Feature 1: the verdict is shown before the analyst decides -------------
+
+
+def test_review_screen_shows_the_verdict_before_deciding(audit):
+    at = _start(_app(), "ALERT_001")
+    text = _page_text(at)
+    assert "COMPROMISED" in text
+    assert "unlikely-travel" in text  # the model narrative is on screen
+    assert at.button(key="approve_0")  # still waiting on the analyst
+
+
+def test_question_screen_shows_the_verdict_before_answering(audit):
+    at = _start(_app(), "ALERT_009")
+    text = _page_text(at)
+    assert "INSUFFICIENT_DATA" in text
+    # The model narrative is on screen before the analyst answers, not only
+    # in the question text.
+    assert "Insufficient data to reach a verdict" in text
+    assert "Do you have context that changes this assessment?" in text

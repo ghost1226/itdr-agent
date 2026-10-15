@@ -542,3 +542,83 @@ def test_unsafe_rollback_is_shown_to_the_reviewer_and_logged(tmp_path):
     assert flagged[0]["run_id"] == "r-rb"
     assert flagged[0]["step_indexes"] == [1]
     assert result.report.unsafe_rollbacks == [1]
+
+
+# --- Feature 1: show the verdict before the analyst decides ----------------
+
+
+class ReportRecordingReviewer(ScriptedReviewer):
+    """A ScriptedReviewer that also records pre-decision report summaries."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.shown: list[tuple[str, float, str]] = []
+
+    def show_report(self, report, dossier) -> None:
+        self.shown.append(
+            (report.verdict.value, report.confidence, dossier.alert_id)
+        )
+
+
+def test_scripted_reviewer_has_no_show_report_hook():
+    # The eval path must stay byte-for-byte identical: ScriptedReviewer has no
+    # show_report, so the orchestrator's getattr hook is a no-op for it.
+    assert not hasattr(ScriptedReviewer(), "show_report")
+
+
+def test_scripted_reviewer_run_audit_unchanged(tmp_path):
+    reviewer = ScriptedReviewer()
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(), [_report()], reviewer=reviewer
+    )
+    result = orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
+    assert [e["event"] for e in _audit(audit)] == ["containment_decision", "run"]
+    assert result.report.verdict is Verdict.COMPROMISED
+
+
+def test_show_report_called_before_first_review_step(tmp_path):
+    reviewer = ReportRecordingReviewer()
+    orch, _llm, _ = _orchestrator(
+        tmp_path, _dossier(), [_report()], reviewer=reviewer
+    )
+    orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
+    assert reviewer.shown == [("COMPROMISED", 0.9, "ALERT_001")]
+
+
+def test_show_report_called_before_question_and_refreshed_after_readjudication(
+    tmp_path,
+):
+    first = _report(verdict="SUSPICIOUS", confidence=0.5)
+    second = _report(verdict="COMPROMISED", confidence=0.9)
+    reviewer = ReportRecordingReviewer(
+        answers=[
+            AskUserResult(
+                status="answered",
+                answer="The activity is suspicious/malicious",
+                choice_index=1,
+            )
+        ]
+    )
+    orch, _llm, _ = _orchestrator(
+        tmp_path, _dossier(alert_id="ALERT_009"), [first, second],
+        reviewer=reviewer,
+    )
+    orch.run({"id": "ALERT_009", "userPrincipalName": ALICE})
+    assert reviewer.shown[0] == ("SUSPICIOUS", 0.5, "ALERT_009")
+    assert reviewer.shown[-1] == ("COMPROMISED", 0.9, "ALERT_009")
+    assert len(reviewer.shown) == 2
+
+
+def test_show_report_not_called_when_there_is_nothing_to_review(tmp_path):
+    reviewer = ReportRecordingReviewer()
+    report = _report(
+        verdict="FALSE_POSITIVE",
+        confidence=0.9,
+        containment_steps=[],
+        mitre_techniques_observed=[],
+    )
+    orch, _llm, _ = _orchestrator(
+        tmp_path, _dossier(), [report], reviewer=reviewer
+    )
+    orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
+    assert reviewer.shown == []

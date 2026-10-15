@@ -378,3 +378,33 @@ def test_start_twice_is_refused(tmp_path):
 def test_core_does_not_import_streamlit():
     source = (PROJECT_ROOT / "itdr_agent" / "gui_run.py").read_text(encoding="utf-8")
     assert "streamlit" not in source
+
+
+# --- Feature 1: the verdict is available before the analyst decides ---------
+
+
+def test_show_report_is_stored_before_review(tmp_path):
+    run, _, _ = _make(tmp_path, [_report()])
+    run.start()
+    run.wait(WAIT)
+    assert run.status == "review"
+    assert run.shown_report is not None
+    assert run.shown_report.verdict.value == "COMPROMISED"
+    assert run.shown_dossier is not None
+    run.decide("approve")
+    run.wait(WAIT)
+
+
+def test_show_report_is_stored_before_the_question_and_refreshed(tmp_path):
+    first = _report(verdict="SUSPICIOUS", confidence=0.5)
+    second = _report(verdict="COMPROMISED", confidence=0.9)
+    run, _, _ = _make(tmp_path, [first, second])
+    run.start()
+    run.wait(WAIT)
+    assert run.status == "question"
+    assert run.shown_report.verdict.value == "SUSPICIOUS"
+    run.answer(choice_index=1)
+    run.wait(WAIT)
+    assert run.shown_report.verdict.value == "COMPROMISED"
+    run.decide("approve")
+    run.wait(WAIT)

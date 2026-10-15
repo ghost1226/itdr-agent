@@ -176,3 +176,29 @@ def test_cli_reviewer_eof_after_edit_raises(monkeypatch):
     monkeypatch.setattr("builtins.input", edit_then_eof)
     with pytest.raises(ReviewAbortedError):
         CliReviewer().review_step(0, "Disable the account", "Re-enable it")
+
+
+# --- Feature 1: the CLI also shows the verdict before the analyst decides ---
+
+
+def test_cli_reviewer_show_report_prints_the_summary(capsys):
+    from itdr_agent.human import CliReviewer
+    from itdr_agent.schemas import AdjudicatorOutput
+
+    report = AdjudicatorOutput(
+        verdict="COMPROMISED",
+        confidence=0.9,
+        narrative="Evidence supports unlikely-travel sign-ins.",
+        containment_steps=[],
+        recommended_actions=[],
+        mitre_techniques_observed=["T1078.004"],
+        audit_notes="",
+    )
+    dossier = type("D", (), {"mitre_attack_evidence": {"T1078.004": ["s1"]}})()
+    CliReviewer().show_report(report, dossier)
+    out = capsys.readouterr().out
+    assert "COMPROMISED" in out
+    assert "0.90" in out
+    assert "Evidence supports unlikely-travel sign-ins." in out
+    assert "T1078.004" in out
+    assert "s1" in out
