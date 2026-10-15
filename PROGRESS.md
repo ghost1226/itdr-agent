@@ -2,7 +2,7 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. Problem #22 fixed: `CliReviewer` no longer approves by default (`30d2503`/`2d56034`). 301 tests.
+Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. Problem #22 fixed: `CliReviewer` no longer approves by default (`30d2503`/`2d56034`). GUI batch 1 done (verdict shown before decisions, alert summaries + incident note, incident queue). 336 tests.
 
 ---
 
@@ -160,6 +160,14 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Green:** `2d56034` — **301 passed**.
   - `CliReviewer.review_step` now accepts only `approve` / `edit` / `reject` (case- and space-insensitive). Anything else, including blank, prints `Please type approve, edit, or reject.` and re-asks; a blank edited step re-asks too. `EOFError` raises `ReviewAbortedError(RuntimeError, EOFError)` (never an approve) and stops the run.
   - `ScriptedReviewer` and the GUI reviewer (`gui_run.py`) are unchanged.
+
+- ✅ GUI batch 1 (2026-10-14; built by Pi, reviewed by Jessica; spec in the vault's GUI UX audit #1, #10, #11):
+  - **Alert summaries** (`itdr_agent/summary.py`, pure, allowlisted fields only, no IPs, no answer key): red `3395db6` / green `9ab4e11`. `what`, `stage` (Attempted / Blocked / Successful; never Compromised before a verdict), `severity` bars, `short_summary`, `incident_note` in Joe's What / User / Analysis / Conclusion / Action layout.
+  - **Verdict before decisions:** red `4b52e3e` / green `fa37ffe`. Orchestrator calls an optional `reviewer.show_report(report, dossier)` before the question and before the first containment step (refreshed after re-adjudication); `GuiRun` and `CliReviewer` implement it, `ScriptedReviewer` doesn't, so the eval path is unchanged.
+  - **Incident queue home:** red `ecbf6b4` / green `bd1416c` (Pi wrote it; its session stopped on OpenRouter credits before committing; Jessica committed it unchanged after review). Table of all alerts with search, severity/status filters, row select, status (Not started / Waiting on you / Closed: VERDICT), Back to queue.
+  - **Fix found in review:** `SUSPICIOUS` had no conclusion line. Red `3331ca2` / green `71143b7` (+ a test that every `Verdict` has one). **336 passed.**
+  - Review: frozen eval files 0-line diff, `ScriptedReviewer` byte-identical; 0 IP / answer-key leaks across all 10 alerts x 4 verdicts; offline Chrome click-through (queue → search → open → verdict above step → approve → incident note → Closed).
+  - Open: Back to queue while a run waits on the analyst drops that run (thread stays blocked, status stuck at "Waiting on you").
 
 ## Microsoft Graph Schema Sources
 
@@ -405,3 +413,11 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `30d2503` — problem-22: red — CliReviewer must reject blank/typo, re-ask blank edit, and abort on EOF
 - `2d56034` — problem-22: green — CliReviewer accepts only approve/edit/reject, re-asks on blank/typo, aborts on EOF
 - `ada82b9` — max-tokens: update PROGRESS.md
+- `3395db6` — gui-batch1-summary: red — pure alert summaries
+- `9ab4e11` — gui-batch1-summary: green — pure alert summaries and shared report-summary lines
+- `4b52e3e` — gui-batch1-showverdict: red — show the report summary before the question and each review step
+- `fa37ffe` — gui-batch1-showverdict: green — optional show_report hook; verdict summary on question/review
+- `ecbf6b4` — gui-batch1-queue: red — incident queue home
+- `bd1416c` — gui-batch1-queue: green — incident queue home (written by Pi, committed by Jessica)
+- `3331ca2` — gui-batch1-summary-fix: red — SUSPICIOUS verdict has no conclusion
+- `71143b7` — gui-batch1-summary-fix: green — SUSPICIOUS conclusion in the incident note
