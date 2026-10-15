@@ -252,3 +252,91 @@ def test_question_screen_shows_the_verdict_before_answering(audit):
     # in the question text.
     assert "Insufficient data to reach a verdict" in text
     assert "Do you have context that changes this assessment?" in text
+
+
+# --- Feature 3: incident queue home view -----------------------------------
+
+
+def _queue(at: AppTest):
+    return at.dataframe[0].value
+
+
+def test_queue_renders_all_ten_alerts(audit):
+    at = _app()
+    df = _queue(at)
+    assert len(df) == 10
+    assert list(df.columns) == ["Name", "Alert ID", "Severity", "Stage", "Status"]
+    assert set(df["Alert ID"]) == {f"ALERT_{n:03d}" for n in range(1, 11)}
+    assert set(df["Status"]) == {"Not started"}
+    assert "10 alerts" in _page_text(at)
+
+
+def test_queue_search_narrows_rows(audit):
+    at = _app()
+    at.text_input(key="queue_search").set_value("alice")
+    at.run()
+    assert not at.exception, at.exception
+    df = _queue(at)
+    assert list(df["Alert ID"]) == ["ALERT_001"]
+    assert "1 alert" in _page_text(at)
+
+
+def test_queue_severity_filter_narrows_rows(audit):
+    at = _app()
+    at.multiselect(key="queue_severity").select("High")
+    at.run()
+    assert not at.exception, at.exception
+    df = _queue(at)
+    assert len(df) == 4
+    assert set(df["Severity"]) == {"■■■ High"}
+
+
+def test_queue_status_filter_narrows_rows(audit):
+    at = _app()
+    at.multiselect(key="queue_status").select("Closed")
+    at.run()
+    assert not at.exception, at.exception
+    assert len(_queue(at)) == 0
+
+
+def test_selecting_a_row_opens_the_run_page(audit):
+    at = _app()
+    at.session_state["queue"] = {
+        "selection": {"rows": [2], "columns": [], "cells": []}
+    }
+    at.run()
+    assert not at.exception, at.exception
+    assert "ALERT_003" in _page_text(at)
+    assert at.button(key="start")
+    assert at.button(key="back_to_queue")
+
+
+def test_back_to_queue_returns_home(audit):
+    at = _app()
+    at.session_state["queue"] = {
+        "selection": {"rows": [0], "columns": [], "cells": []}
+    }
+    at.run()
+    at.button(key="back_to_queue").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert len(_queue(at)) == 10
+
+
+def test_status_updates_to_closed_after_offline_run(audit):
+    at = _start(_app(), "ALERT_010")
+    assert "INSUFFICIENT_DATA" in _page_text(at)
+    at.button(key="back_to_queue").click()
+    at.run()
+    assert not at.exception, at.exception
+    df = _queue(at)
+    row = df[df["Alert ID"] == "ALERT_010"].iloc[0]
+    assert row["Status"] == "Closed: INSUFFICIENT_DATA"
+
+
+def test_incident_note_is_shown_on_the_report(audit):
+    at = _start(_app(), "ALERT_010")
+    text = _page_text(at)
+    assert "Alert: ALERT_010" in text
+    assert "IP reputation: not available in this dataset." in text
+    assert "No action required" in text
