@@ -419,6 +419,8 @@ class Orchestrator:
                     "original_step": step.step,
                     "decision": decision.decision,
                     "final_step": final_step,
+                    "rollback": step.rollback,
+                    "unsafe_rollback": index in unsafe,
                     "reason": decision.reason,
                 },
             )
