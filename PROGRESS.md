@@ -224,6 +224,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 1. ~~Smoke test first~~ DONE (passed on Nemotron): `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
 2. Then `python scripts/evaluate.py --live` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
 3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
+**Evaluation DONE 2026-10-16:** the partner's 15 runs came in as PR #1 (`partner-eval`, only `eval/partner/`), merged by Joe (`33c00f8`); `--combine eval eval/partner` → `eval/final/` (`0924fc3`): 30/30, 0 failed, exact 80.0%, majority-of-3 80% (misses ALERT_004 app consent, ALERT_009 thin data), detection 100%, 0 of 9 benign flagged, MITRE P 100% / R 83.3%, agreement 93.3%. README eval section refreshed.
 4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README. **Started 2026-10-13:** `PROJECT_BRIEF.md` has section 7 (Limits and risks, approved by Joe, every claim cited, Claims-to-verify table); sections 1-6 and 9 added 2026-10-13 (approved by Joe; Microsoft comparison checked on Microsoft Learn: Entra ID Protection, Identity Risk Management Agent (preview; PLAN's "Risk Management agent"), Purview DLP Triage Agent); only 8 left, blocked on Joe's baseline. Refresh section 7's numbers when the eval finishes.
 
 ~~Open: the orchestrator's total timeout was never enforced.~~ **Fixed 2026-10-13** (`ccb1b61`/`d0d6b15`).
@@ -421,3 +422,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `bd1416c` — gui-batch1-queue: green — incident queue home (written by Pi, committed by Jessica)
 - `3331ca2` — gui-batch1-summary-fix: red — SUSPICIOUS verdict has no conclusion
 - `71143b7` — gui-batch1-summary-fix: green — SUSPICIOUS conclusion in the incident note
+- `33c00f8` — Merge PR #1: partner evaluation results (ALERT_004, 005, 007, 008, 010 x3)
+- `0924fc3` — Combined evaluation: 30 of 30 runs
