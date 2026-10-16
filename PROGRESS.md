@@ -154,6 +154,9 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
   - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
   - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
+- ✅ One default model (problems #11 + #30, 2026-10-16, Joe: "yes"):
+  - **Why:** the GUI and CLI still defaulted to Gemma 4 31B; Joe's first live GUI test hit Gemma's upstream 429 again. The eval has used Nemotron since 2026-10-12.
+  - **Red:** `49fb1c3` (7 failed) → **Green:** `f7a0c62` (378 passed). `adjudicator.DEFAULT_MODEL` = `nvidia/nemotron-3-super-120b-a12b:free`; `evaluate.EVAL_DEFAULT_MODEL` imports it; `run_investigator_live.pick_model()` = OPENROUTER_MODEL → EVAL_MODEL → default (no longer refuses to run); `.env.example` has `EVAL_MODEL=…`; README updated. EVAL_MODEL still overrides everywhere.
 - ✅ Verdict box in Joe's ticket format (2026-10-16, Joe: "approve"):
   - **Why:** Joe wanted the pre-decision box to keep the model's narrative and add his incident-note format plus a short summary on top.
   - **Red:** `9bdc723` (9 failed, 360 passed) → **Green:** `e8a5c6e` (369 passed).
@@ -357,7 +360,7 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 5. ~~**Orchestrator total timeout not enforced.**~~ **Fixed 2026-10-13** (`d0d6b15`), including the eval passing 90 s instead of 120 s.
 8. **Mid-eval code change.** 12 of Joe's runs predate fixes 2 and 3; say so in PROJECT_BRIEF.
 10. **Confidently wrong on thin data (2026-10-14). Guard added 2026-10-16 (`d12a110`); after-fix eval pending.** ALERT_009 (expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90-0.92 in all 3 runs: missing evidence read as benign, so the 0.7 guardrail and the one question never fired. No code change mid-eval (Joe, 2026-10-14); any fix comes after the eval, with ALERT_009 re-run as a separate after-fix row. Say so in PROJECT_BRIEF.
-11. **Model selection is inconsistent.** The CLI and eval read `EVAL_MODEL`, `scripts/run_investigator_live.py` requires `OPENROUTER_MODEL` (not in `.env.example`), `scripts/run_adjudicator_live.py` takes an argument. README documents each as is; unifying them is Joe's call.
+11. ~~**Model selection is inconsistent.**~~ **Fixed 2026-10-16** (`f7a0c62`): one default (Nemotron), EVAL_MODEL everywhere. The CLI and eval read `EVAL_MODEL`, `scripts/run_investigator_live.py` requires `OPENROUTER_MODEL` (not in `.env.example`), `scripts/run_adjudicator_live.py` takes an argument. README documents each as is; unifying them is Joe's call.
 9. ~~**Unsafe rollbacks.**~~ **Fixed 2026-10-13** (fix 3): flagged, warned, logged; still pattern-based, so a reworded unsafe rollback can slip through.
 6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
@@ -454,3 +457,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `b6d5a5a` — token-cut: green — sign-in summary for the investigator model; compact JSON
 - `e8a5c6e` — verdict-box: green — what-happened summary, Joe's ticket format, found-What in the incident note
 - `b6e7aba` — verdict-box-top: green — What happened right below the alert line
+- `49fb1c3` — default-model: red — one default model everywhere
+- `f7a0c62` — default-model: green — Nemotron is the default; EVAL_MODEL overrides
