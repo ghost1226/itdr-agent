@@ -154,6 +154,11 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
   - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
   - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
+- ✅ Thin-evidence guard (problem #14) + investigator token cut (2026-10-16, Joe: "go ahead"):
+  - **Fix 1 (#14):** red `d068a4a` (6 failed, 347 passed) → green `d12a110` (353 passed). `MIN_BASELINE_SIGN_INS = 3`; `is_thin_evidence` = fewer than 3 sign-ins AND no directory audits; `apply_thin_evidence_guard` turns a FALSE_POSITIVE on thin evidence into INSUFFICIENT_DATA (sets `thin_evidence`, audit note, `thin_evidence` audit line), which triggers the one analyst question; skipped once an analyst has answered. Prompt rule: "Missing evidence is not evidence of benign activity." In the fixtures only ALERT_009 is thin (ALERT_004 has an audit; ALERT_010 short-circuits). `test_show_report_not_called_when_there_is_nothing_to_review` given 3 sign-ins (its 1-sign-in dossier is now thin; intent unchanged).
+  - **Fix 2 (token cut):** red `695c8f0` (6 failed) → green `b6d5a5a` (360 passed). `summarize_tool_result`: the Investigator's model gets a sign-in summary (count, first/last, device ids, countries, IPs, apps, failures, risk events/levels) instead of raw records; the dossier and the Adjudicator still get every raw record. `wrap_tool_output` uses compact JSON separators. pip-audit: no known vulnerabilities.
+  - **offline prompt size** (fixed 6-call tool sequence per alert, ~4 chars/token): average input ~8,515 → ~5,400 tokens per alert (-37%); ALERT_002 15,619 → 6,986 (-55%). Estimate only; the after-fix eval measures the real numbers.
+  - **Next:** after-fix eval in `eval/after-fix/` (all 10 alerts x1 + ALERT_009 x3 = 12 runs), separate from the locked final eval.
 - ✅ Token counter (2026-10-16, Joe: "i want to add a token counter ... so we know how much token is being spent"; CLI + GUI + audit log):
   - **Why:** only `scripts/evaluate.py` counted tokens; a normal CLI or GUI run spent tokens with no record.
   - **Red:** `bf41698` — `tests/test_token_meter.py`, **11 failed, 336 passed**.
@@ -346,11 +351,18 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 4. ~~**Model overclaims actions.**~~ **Fixed 2026-10-13** (`d0d6b15`): recommend-only prompt rule + action-claim guard that flags (does not reject) and logs `action_claim`. Runs before the fix are not re-scored.
 5. ~~**Orchestrator total timeout not enforced.**~~ **Fixed 2026-10-13** (`d0d6b15`), including the eval passing 90 s instead of 120 s.
 8. **Mid-eval code change.** 12 of Joe's runs predate fixes 2 and 3; say so in PROJECT_BRIEF.
-10. **Confidently wrong on thin data (2026-10-14).** ALERT_009 (expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90-0.92 in all 3 runs: missing evidence read as benign, so the 0.7 guardrail and the one question never fired. No code change mid-eval (Joe, 2026-10-14); any fix comes after the eval, with ALERT_009 re-run as a separate after-fix row. Say so in PROJECT_BRIEF.
+10. **Confidently wrong on thin data (2026-10-14). Guard added 2026-10-16 (`d12a110`); after-fix eval pending.** ALERT_009 (expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90-0.92 in all 3 runs: missing evidence read as benign, so the 0.7 guardrail and the one question never fired. No code change mid-eval (Joe, 2026-10-14); any fix comes after the eval, with ALERT_009 re-run as a separate after-fix row. Say so in PROJECT_BRIEF.
 11. **Model selection is inconsistent.** The CLI and eval read `EVAL_MODEL`, `scripts/run_investigator_live.py` requires `OPENROUTER_MODEL` (not in `.env.example`), `scripts/run_adjudicator_live.py` takes an argument. README documents each as is; unifying them is Joe's call.
 9. ~~**Unsafe rollbacks.**~~ **Fixed 2026-10-13** (fix 3): flagged, warned, logged; still pattern-based, so a reworded unsafe rollback can slip through.
 6. **Scoring never tests the human-help path.** The scripted reviewer cancels every question, so the one-question re-adjudication is unmeasured.
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
+
+12. **Thin-data threshold picked knowing the test data (2026-10-16).** `MIN_BASELINE_SIGN_INS = 3` matches the generator's thin_data (1-2 sign-ins); ALERT_006 has exactly 3. Judgment call, not measured.
+13. **Whole conversation resent every call (2026-10-16).** ~12k tokens/alert, mostly raw sign-ins resent on each investigator turn. Fix 2 in progress.
+14. **Investigator skips needed tools (2026-10-16).** ALERT_004 runs 1-2 never fetched directory audits → missed T1528. Not fixed; watch in the after-fix eval.
+15. **Shared test dossier is thin (2026-10-16).** 1 sign-in, no audits; one test adjusted to 3 sign-ins in `d12a110`.
+16. **Output tokens not fully explained (2026-10-16).** Likely hidden reasoning; unverified.
+17. **Eval records have no code version (2026-10-16).** `raw.jsonl` lacks a commit hash.
 
 Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): Joe's vault, "ITDR Agent — Build Journal", "Problems to talk about".
 
@@ -431,3 +443,7 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `0924fc3` — Combined evaluation: 30 of 30 runs
 - `bf41698` — token-meter: red — per-run token totals in the CLI, GUI, and audit log
 - `3f9bf8a` — token-meter: green — TokenMeter per run; CLI, GUI, audit log
+- `d068a4a` — problem-14: red — thin evidence cannot support a FALSE_POSITIVE
+- `d12a110` — problem-14: green — thin-evidence guard, prompt rule, audit line
+- `695c8f0` — token-cut: red — investigator sees sign-in summaries, compact JSON
+- `b6d5a5a` — token-cut: green — sign-in summary for the investigator model; compact JSON
