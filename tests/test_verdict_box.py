@@ -181,3 +181,49 @@ def test_gui_box_shows_summary_narrative_and_ticket(tmp_path, monkeypatch):
     assert "Alert: ALERT_001" in text
     assert "What: Unlikely travel involving one user" in text
     assert "Action: Proposed, each step needs your approval below:" in text
+
+
+def _in_order(at) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+
+    def walk(node):
+        children = getattr(node, "children", None) or {}
+        for key in sorted(children):
+            child = children[key]
+            value = getattr(child, "value", None)
+            if isinstance(value, str):
+                out.append((child.type, value))
+            walk(child)
+
+    walk(at.main)
+    return out
+
+
+def _index(items, needle: str) -> int:
+    return next(i for i, (_t, v) in enumerate(items) if v.startswith(needle))
+
+
+def test_what_happened_sits_right_below_the_alert_line(tmp_path, monkeypatch):
+    """Joe, 2026-10-16: move it to the top, right below the alert line."""
+    pytest.importorskip("streamlit")
+    from test_app import _app, _start
+
+    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    at = _start(_app(), "ALERT_001")
+    items = _in_order(at)
+    line = _index(items, "ALERT_001 · ")
+    assert items[line + 1] == ("markdown", "**What happened:**")
+    assert items[line + 2][1].startswith("alice.traveler@contoso.com had ")
+    assert _index(items, "**Verdict:") > line + 2
+    assert [v for _t, v in items].count("**What happened:**") == 1
+
+
+def test_what_happened_stays_on_the_report(tmp_path, monkeypatch):
+    pytest.importorskip("streamlit")
+    from test_app import _app, _start
+
+    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    at = _start(_app(), "ALERT_010")  # short-circuits straight to the report
+    items = _in_order(at)
+    line = _index(items, "ALERT_010 · ")
+    assert items[line + 1] == ("markdown", "**What happened:**")
