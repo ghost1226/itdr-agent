@@ -102,6 +102,7 @@ class GuiRun:
         decision: str,
         edited_step: str | None = None,
         reason: str | None = None,
+        edited_rollback: str | None = None,
     ) -> None:
         """Approve, edit, or reject the containment step on screen."""
         with self._cond:
@@ -110,13 +111,15 @@ class GuiRun:
             if decision not in DECISIONS:
                 raise ValueError(f"unknown decision {decision!r}")
             if decision == "edit":
-                if not (edited_step or "").strip():
-                    raise ValueError("an edit needs the new step text")
-                edited_step = edited_step.strip()
+                edited_step = (edited_step or "").strip() or None
+                edited_rollback = (edited_rollback or "").strip() or None
+                if not (edited_step or edited_rollback):
+                    raise ValueError("an edit needs a new step or a new rollback")
             self._hand_back(
                 ContainmentDecision(
                     decision=decision,
                     edited_step=edited_step if decision == "edit" else None,
+                    edited_rollback=edited_rollback if decision == "edit" else None,
                     reason=(reason or None) if decision == "reject" else None,
                 )
             )

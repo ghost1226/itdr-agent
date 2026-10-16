@@ -118,8 +118,9 @@ _UNSAFE_ROLLBACK_PATTERNS = [
 
 UNSAFE_ROLLBACK_WARNING = (
     "This rollback would restore a credential or MFA setup the attacker may "
-    "know. Edit it before approving (a safe undo issues a new temporary "
-    "password or has the user re-register MFA after verifying identity)."
+    "know. Edit the rollback before approving, or reject the step (a safe "
+    "undo issues a new temporary password or has the user re-register MFA "
+    "after verifying identity)."
 )
 UNSAFE_ROLLBACK_NOTE = (
     "Unsafe-rollback guard: the rollback for step(s) {steps} would restore a "
@@ -252,12 +253,17 @@ def apply_thin_evidence_guard(
     return report
 
 
+def is_unsafe_rollback(text: str) -> bool:
+    """True if a rollback would restore a credential or MFA setup."""
+    return any(p.search(text) for p in _UNSAFE_ROLLBACK_PATTERNS)
+
+
 def find_unsafe_rollbacks(report: AdjudicatorOutput) -> list[int]:
     """Indexes of containment steps whose rollback restores a credential."""
     return [
         index
         for index, step in enumerate(report.containment_steps)
-        if any(p.search(step.rollback) for p in _UNSAFE_ROLLBACK_PATTERNS)
+        if is_unsafe_rollback(step.rollback)
     ]
 
 

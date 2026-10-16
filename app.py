@@ -147,6 +147,7 @@ def _decide(run: GuiRun, index: int, decision: str) -> None:
         lambda: run.decide(
             decision,
             edited_step=state.get(f"edited_step_{index}"),
+            edited_rollback=state.get(f"edited_rollback_{index}"),
             reason=state.get(f"reject_reason_{index}") or "analyst rejected",
         )
     )
@@ -283,7 +284,8 @@ def _review(run: GuiRun) -> None:
     st.text(pending["rollback"])
     if pending["warning"]:
         st.warning(pending["warning"])
-    st.text_input("New step text (for Edit)", key=f"edited_step_{index}")
+    st.text_input("New step text (for Edit; blank keeps it)", key=f"edited_step_{index}")
+    st.text_input("New rollback (for Edit; blank keeps it)", key=f"edited_rollback_{index}")
     st.text_input("Reason (for Reject, optional)", key=f"reject_reason_{index}")
     approve, edit, reject = st.columns(3)
     approve.button("Approve", key=f"approve_{index}", type="primary",

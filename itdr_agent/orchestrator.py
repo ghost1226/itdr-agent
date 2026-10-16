@@ -40,6 +40,7 @@ from .adjudicator import (
     Adjudicator,
     UnsupportedMitreClaimError,
     find_unsafe_rollbacks,
+    is_unsafe_rollback,
 )
 from .human import Reviewer
 from .investigator import InvestigationTimeoutError
@@ -393,18 +394,22 @@ class Orchestrator:
                 index, step.step, step.rollback, warning=warning
             )
             final_step: str | None = step.step
+            final_rollback: str | None = step.rollback
             if decision.decision == "approve":
                 kept.append(step)
             elif decision.decision == "edit":
-                edited = (decision.edited_step or "").strip()
-                if not edited:
-                    raise OrchestrationError("edit must provide a step")
-                if not step.rollback.strip():
+                new_step = (decision.edited_step or "").strip()
+                new_rollback = (getattr(decision, "edited_rollback", None) or "").strip()
+                if not (new_step or new_rollback):
+                    raise OrchestrationError("edit must change the step or the rollback")
+                final_step = new_step or step.step
+                final_rollback = new_rollback or step.rollback
+                if not final_rollback.strip():
                     raise OrchestrationError("edited step must keep a rollback")
-                kept.append(ContainmentStep(step=edited, rollback=step.rollback))
-                final_step = edited
+                kept.append(ContainmentStep(step=final_step, rollback=final_rollback))
             elif decision.decision == "reject":
                 final_step = None
+                final_rollback = None
             else:
                 raise OrchestrationError(
                     f"unknown containment decision: {decision.decision}"
@@ -421,6 +426,11 @@ class Orchestrator:
                     "final_step": final_step,
                     "rollback": step.rollback,
                     "unsafe_rollback": index in unsafe,
+                    "final_rollback": final_rollback,
+                    "final_unsafe_rollback": (
+                        None if final_rollback is None
+                        else is_unsafe_rollback(final_rollback)
+                    ),
                     "reason": decision.reason,
                 },
             )

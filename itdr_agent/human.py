@@ -46,7 +46,8 @@ def cancelled_result() -> AskUserResult:
 @dataclass(frozen=True)
 class ContainmentDecision:
     decision: str  # "approve" | "edit" | "reject"
-    edited_step: str | None = None
+    edited_step: str | None = None  # None/blank keeps the step
+    edited_rollback: str | None = None  # None/blank keeps the rollback
     reason: str | None = None
 
 
@@ -101,8 +102,9 @@ class CliReviewer:
     """Interactive reviewer for the CLI (tests inject ``input()``).
 
     Accepts only ``approve`` / ``edit`` / ``reject`` (case- and
-    space-insensitive). Anything else, including a blank line, re-asks. A
-    blank edit re-asks too. EOF before a valid answer raises
+    space-insensitive). Anything else, including a blank line, re-asks. Edit
+    asks for a new step and a new rollback (blank keeps each); an edit that
+    changes neither re-asks. EOF before a valid answer raises
     :class:`ReviewAbortedError` and never approves.
     """
 
@@ -126,9 +128,14 @@ class CliReviewer:
             if choice == "reject":
                 return ContainmentDecision(decision="reject", reason="analyst rejected")
             if choice == "edit":
-                edited = self._read_edit()
-                if edited:
-                    return ContainmentDecision(decision="edit", edited_step=edited)
+                edited = self._read_edit("new step (blank keeps it): ")
+                rollback = self._read_edit("new rollback (blank keeps it): ")
+                if edited or rollback:
+                    return ContainmentDecision(
+                        decision="edit",
+                        edited_step=edited or None,
+                        edited_rollback=rollback or None,
+                    )
             print(self.INVALID)
 
     @classmethod
@@ -141,9 +148,9 @@ class CliReviewer:
             ) from exc
 
     @classmethod
-    def _read_edit(cls) -> str:
+    def _read_edit(cls, prompt: str) -> str:
         try:
-            return input("new step: ").strip()
+            return input(prompt).strip()
         except EOFError as exc:
             raise ReviewAbortedError(
                 "input ended before the edited step was supplied"
