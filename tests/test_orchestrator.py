@@ -631,3 +631,23 @@ def test_show_report_not_called_when_there_is_nothing_to_review(tmp_path):
     )
     orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
     assert reviewer.shown == []
+
+
+# --- Problem #31: the audit line records the rollback (2026-10-16) ----------
+
+
+def test_containment_decision_line_records_rollback_and_unsafe_flag(tmp_path):
+    report = _report(
+        containment_steps=[
+            {"step": "Reset the user's password",
+             "rollback": "Revert the password to its previous value"},
+            {"step": "Revoke sessions", "rollback": "User signs in again"},
+        ]
+    )
+    orch, _llm, audit = _orchestrator(tmp_path, _dossier(), [report])
+    orch.run({"id": "ALERT_001"})
+    lines = [e for e in _audit(audit) if e["event"] == "containment_decision"]
+    assert lines[0]["rollback"] == "Revert the password to its previous value"
+    assert lines[0]["unsafe_rollback"] is True
+    assert lines[1]["rollback"] == "User signs in again"
+    assert lines[1]["unsafe_rollback"] is False
