@@ -32,7 +32,7 @@ The alert alone doesn't answer the analyst's real question: is this account comp
 | Outputs | Incident report: verdict (COMPROMISED, SUSPICIOUS, FALSE_POSITIVE, INSUFFICIENT_DATA), confidence, narrative, MITRE techniques, containment steps each with a rollback, recommended actions, audit notes [C7]; plus one audit log line per event [C5]. |
 | Constraints | Synthetic data only [A1]; free model [E1]; 120 seconds of machine time per run [C4]; the agent executes nothing, it only recommends [C2]; all data treated as untrusted [T4]. |
 | Human decision points | (1) One question when the verdict is INSUFFICIENT_DATA or confidence is below 0.70, then at most one re-check; (2) approve, edit, or reject each containment step [C5]. |
-| Success criteria | Measured against ground truth for 10 alerts × 3 runs: exact verdict accuracy (primary), attack-vs-benign detection, false positives, MITRE precision and recall, run-to-run agreement, time, and requests [P7, E1]. Current numbers are in section 7 and `eval/results.md`. |
+| Success criteria | Measured against ground truth for 10 alerts × 3 runs: exact verdict accuracy (primary), attack-vs-benign detection, false positives, MITRE precision and recall, run-to-run agreement, time, and requests [P7, E1]. Final numbers are in section 7 and `eval/final/results.md`. |
 
 ## 5. Flow diagram
 
@@ -64,7 +64,7 @@ What this project adds next to them: it works without premium licenses, writes c
 
 ## 7. Limits and risks
 
-The numbers below come from a partial evaluation: 12 of 30 runs, as of October 13, 2026 [E1]. They will be replaced with the final numbers when all 30 runs are done.
+The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run from October 12 to 15, 2026 on two free accounts (Joe's 15 and his partner's 15), combined into one report [E1].
 
 ### 7.1 Synthetic data, no real tenant
 
@@ -74,10 +74,10 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 
 ### 7.2 Free-model variability and reproducibility
 
-- **The same alert can get a different answer.** At temperature 0, ALERT_006 (benign travel) came back INSUFFICIENT_DATA (confidence 0.55), then FALSE_POSITIVE (0.90), then FALSE_POSITIVE (0.70). Multi-run agreement is 91.7% so far [E1].
+- **The same alert can get a different answer.** At temperature 0, ALERT_006 (benign travel) came back INSUFFICIENT_DATA (confidence 0.55), then FALSE_POSITIVE (0.90), then FALSE_POSITIVE (0.70). ALERT_004 (app consent) came back SUSPICIOUS (0.78), SUSPICIOUS (0.72), then COMPROMISED (0.88). Multi-run agreement is 93.3% [E1].
 - **The evaluated model is not the one first verified.** Checkpoint 5 was verified on Gemma 4 31B (free). Gemma was rate-limited by its provider on both smoke-test attempts, so the evaluation runs on Nemotron 3 Super (free) [P3]. OpenRouter documents that a 429 can come from the upstream provider [X1]. Free models can change or disappear, so these results may not be reproducible later.
 - **One model only.** No other model was evaluated, so there is no comparison across models.
-- **The code changed during the evaluation.** After 12 of Joe's 15 runs, a total timeout and an action-claim guard were added (commit `d0d6b15`), then an unsafe-rollback guard (commit `1a83ccb`) [P4]. Those 12 runs used the earlier code; the remaining runs use the new code. Neither change alters how a verdict is decided, but two things differ: a run that passes 120 seconds is now scored as failed (none of the first 12 took longer than 73 seconds [E1]), and the prompt gained two rules ("You only recommend…" and never restoring an old password or MFA setup in a rollback), which could change the model's wording in later runs [C2].
+- **The code changed during the evaluation.** Three changes landed mid-evaluation: a total timeout and an action-claim guard (commit `d0d6b15`), an unsafe-rollback guard (commit `1a83ccb`), and an 8,192-token output cap on every model call (commit `7fefa50`) [P4, P9]. At least 18 of the 30 runs used the code from before `d0d6b15`: Joe's 12 runs of ALERT_001, 002, 003, and 006, and the partner's 6 runs of ALERT_004 and 005, which ran before the fix existed [E1]. Joe's 3 ALERT_009 runs used both guards but not the output cap. The run records don't store the code version, so for the partner's 9 later runs (ALERT_007, 008, 010) the newer code applies only if the partner pulled first. None of these changes alters how a verdict is decided, but the prompt gained two rules ("You only recommend…" and never restoring an old password or MFA setup in a rollback), which could change the model's wording [C2]. No run took longer than 83 seconds, so the 120-second limit never decided a result [E1].
 
 ### 7.3 Prompt injection
 
@@ -86,9 +86,12 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 
 ### 7.4 False positives and missed attacks
 
-- **So far:** 0 of 3 benign runs were called COMPROMISED or SUSPICIOUS, and all 9 attack runs were caught with the correct MITRE technique [E1]. One benign run fell back to INSUFFICIENT_DATA instead of FALSE_POSITIVE [E1].
+- **False positives:** 0 of 9 benign runs were called COMPROMISED or SUSPICIOUS. One benign run (ALERT_006) fell back to INSUFFICIENT_DATA instead of FALSE_POSITIVE [E1].
+- **Attacks:** all 15 attack runs were flagged as COMPROMISED or SUSPICIOUS, so none was missed outright. 13 of 15 got the exact verdict with the correct MITRE technique. The 2 misses were ALERT_004 (app consent): the Investigator didn't gather the consent record, so the model said SUSPICIOUS and named no technique. In the third run it did gather it and said COMPROMISED with T1528 [E1].
+- **Confidently wrong on thin data.** ALERT_009 (a known user with 2 sign-ins and no audits; expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90 to 0.92 in all 3 runs. The model read missing evidence as proof that nothing happened, so the 0.70 guardrail never fired and the analyst was never asked [E1, P10]. In a real SOC that closes a case nobody actually checked. Any fix comes after the evaluation, with ALERT_009 re-run as a separate after-fix result [P10].
+- **MITRE:** precision 100% (15 correct, 0 wrong), recall 83.3% (3 missed: the two ALERT_004 runs and one ALERT_007 run) [E1].
 - **Why that fallback happens.** Any verdict below 0.70 confidence is turned into INSUFFICIENT_DATA in code [C3]. That sends uncertain cases to the analyst instead of making a wrong call, but it costs analyst time.
-- **Small sample.** Ten alerts, three runs each. Joe's half covers one of the three benign alerts (ALERT_006); the other two (ALERT_007, ALERT_008) are in the partner's half [P5]. The false-positive rate on real alert volume is unknown.
+- **Small sample.** Ten alerts, three runs each, split across two people [P5]. The false-positive rate on real alert volume is unknown.
 
 ### 7.5 Human oversight: what the numbers don't show
 
@@ -99,16 +102,16 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 ### 7.6 Cost and latency
 
 - **Model cost: $0.** The evaluation uses a free model on OpenRouter. Free models are limited to 20 requests a minute and 50 a day, or 1,000 a day after buying at least 10 credits [X1].
-- **Per run (so far):** 42.8 seconds on average (26.4 to 72.6), about 6.7 model requests (80 over 12 runs), and about 10,900 tokens in and 3,000 out [E1].
-- **The free tier makes evaluation slow.** With a 45-request daily budget and room for a 10-request worst case reserved before every run, 30 runs take about six days [P6]. The dry run estimated five days, worst case eight [P6].
+- **Per run:** 44.3 seconds on average (26.4 to 82.1), about 6.4 model requests (192 over 30 runs), and about 9,600 tokens in and 2,600 out [E1].
+- **The free tier makes evaluation slow.** With a 45-request daily budget and room for a 10-request worst case reserved before every run, 30 runs on one account take about six days [P6]. The dry run estimated five days, worst case eight [P6]. Splitting the runs across two accounts finished them in four UTC days [E1].
 - **A run has 120 seconds of machine time.** Runs that go over are stopped and scored as failed; time an analyst spends answering does not count [C4].
 - **No paid-model estimate.** Cost on a paid model was not measured.
 - **Time saved versus a person:** see section 8, which needs Joe's manual baseline.
 
 ### Citations (section 7)
 
-- **[E1]** `eval/results.md` (Headline metrics, Per alert, Per run, Failure table), commit `3c65367`.
-- **[E2]** `eval/results.md`, Method: "a scripted reviewer approves every containment step and cancels every `ask_user` question."
+- **[E1]** `eval/final/results.md` and `eval/final/raw.jsonl` (Headline metrics, Per alert, Per run, Failure table), commit `0924fc3`; combined from `eval/` (Joe) and `eval/partner/` (partner, PR #1, merge `33c00f8`).
+- **[E2]** `eval/final/results.md`, Method: "a scripted reviewer approves every containment step and cancels every `ask_user` question."
 - **[F1]** `data/fixtures/` (`alerts.jsonl` 10, `users.jsonl` 30, `sign_ins.jsonl` 133, `directory_audits.jsonl` 53, `ground_truth.jsonl` 10); `itdr_agent/data_generator.py`.
 - **[A1]** `AGENTS.md`, Standing Rule 1 ("Synthetic data only").
 - **[C1]** `itdr_agent/sim_api.py`, `itdr_agent/fixture_store.py`.
@@ -129,13 +132,15 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 - **[P5]** PROGRESS.md, Checkpoint 7 split (Joe: ALERT_001, 002, 003, 006, 009; partner: 004, 005, 007, 008, 010).
 - **[P6]** PROGRESS.md, Checkpoint 7 (budget, dry run) and Open Problem 7.
 - **[P8]** PROGRESS.md, "Checkpoint 7 fix 3" (the live ALERT_001 run, 2026-10-13).
+- **[P9]** PROGRESS.md, max-tokens fix (`8642520` / `7fefa50`, `config.MAX_OUTPUT_TOKENS = 8192`).
+- **[P10]** PROGRESS.md, Open Problem 10 ("Confidently wrong on thin data").
 - **[X1]** OpenRouter, API rate limits: https://openrouter.ai/docs/api/reference/limits (checked 2026-10-13).
 
 ### Claims to verify (section 7)
 
 | Claim | Citation |
 |---|---|
-| 12 of 30 runs complete as of 2026-10-13 | E1 |
+| 30 of 30 runs complete, 0 failed, 2026-10-12 to 10-15, two accounts | E1 |
 | Corpus: 10 alerts, 30 users, 133 sign-ins, 53 audits | F1 |
 | No real data used | A1 |
 | Graph is simulated | C1 |
@@ -143,23 +148,25 @@ The numbers below come from a partial evaluation: 12 of 30 runs, as of October 1
 | `networkLocationDetails` is beta-only | P1 |
 | Answer key never reaches the model | T2 |
 | Each technique points to its evidence record | T3 |
-| ALERT_006 outcomes 0.55 / 0.90 / 0.70; agreement 91.7% | E1 |
+| ALERT_006 outcomes 0.55 / 0.90 / 0.70; ALERT_004 0.78 / 0.72 / 0.88; agreement 93.3% | E1 |
 | Gemma rate-limited upstream; eval on Nemotron | P3 |
 | 429s can come from the upstream provider | X1 |
-| 12 of Joe's runs predate `d0d6b15` | P4 |
+| At least 18 runs predate `d0d6b15`; ALERT_009 runs predate `7fefa50`; partner's later runs depend on a pull | P4, P9, E1 |
 | Wrapper escaping and breakout/instruction probes | T4 |
 | MITRE claims checked in code | T5 |
-| 0 of 3 benign runs flagged; 9 of 9 attack runs caught with correct technique | E1 |
+| 0 of 9 benign runs flagged; 15 of 15 attack runs flagged; 13 of 15 exact with correct technique | E1 |
+| ALERT_009 FALSE_POSITIVE at 0.90-0.92 in all 3 runs | E1, P10 |
+| MITRE precision 100% (TP 15), recall 83.3% (FN 3) | E1 |
 | Below 0.70 becomes INSUFFICIENT_DATA | C3 |
-| Joe's half has 1 of 3 benign alerts | P5 |
+| Runs split between two people | P5 |
 | Scripted reviewer cancels every question | E2 |
 | Model wrote "Containment steps executed as per playbook" | P3 |
 | Action-claim guard flags the wording | T6 |
 | Model proposed "revert the password to its previous value" as a rollback | P8 |
 | Unsafe-rollback guard flags, warns, and logs | T7 |
 | Free models: 20/min, 50/day, 1,000/day with 10+ credits | X1 |
-| 42.8 s average (26.4-72.6), 80 requests / 12 runs, ~10.9k in / 3.0k out tokens | E1 |
-| ~6 days for 30 runs; dry run 5, worst case 8 | P6 |
+| 44.3 s average (26.4-82.1), 192 requests / 30 runs, ~9.6k in / 2.6k out tokens | E1 |
+| ~6 days for 30 runs on one account; dry run 5, worst case 8; 4 UTC days on two accounts | P6, E1 |
 | 120 s machine time per run, analyst time excluded | C4 |
 
 ## 8. Practical value
