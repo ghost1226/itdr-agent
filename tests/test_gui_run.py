@@ -409,3 +409,15 @@ def test_show_report_is_stored_before_the_question_and_refreshed(tmp_path):
     assert run.shown_report.verdict.value == "COMPROMISED"
     run.decide("approve")
     run.wait(WAIT)
+
+
+def test_edit_rollback_only_from_the_page(tmp_path):
+    run, _, audit = _make(tmp_path, [_report()])
+    run.start()
+    run.wait(WAIT)
+    run.decide("edit", edited_rollback="Have the user sign in again")
+    run.wait(WAIT)
+    (step,) = run.result.report.containment_steps
+    assert step.rollback == "Have the user sign in again"
+    line = _events(audit, "containment_decision")[0]
+    assert line["final_rollback"] == "Have the user sign in again"

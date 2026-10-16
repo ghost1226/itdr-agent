@@ -340,3 +340,13 @@ def test_incident_note_is_shown_on_the_report(audit):
     assert "Alert: ALERT_010" in text
     assert "IP reputation: not available in this dataset." in text
     assert "No action required" in text
+
+
+def test_edit_the_rollback_on_the_page(audit):
+    at = _start(_app(), "ALERT_001")
+    at.text_input(key="edited_rollback_0").set_value("Re-enable after ID check")
+    at.button(key="edit_0").click()
+    at.run()
+    assert not at.exception, at.exception
+    line = _events(audit, "containment_decision")[0]
+    assert line["final_rollback"] == "Re-enable after ID check"

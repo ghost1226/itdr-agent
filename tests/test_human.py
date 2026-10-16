@@ -128,7 +128,7 @@ def test_cli_reviewer_typo_does_not_approve(monkeypatch, capsys):
 def test_cli_reviewer_valid_edit(monkeypatch):
     from itdr_agent.human import CliReviewer
 
-    _cli_inputs(monkeypatch, ["EDIT", "  Revoke all sessions  "])
+    _cli_inputs(monkeypatch, ["EDIT", "  Revoke all sessions  ", ""])  # blank rollback keeps it
     decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
     assert decision.decision == "edit"
     assert decision.edited_step == "Revoke all sessions"
@@ -145,7 +145,7 @@ def test_cli_reviewer_valid_reject(monkeypatch):
 def test_cli_reviewer_blank_edit_text_asks_again(monkeypatch, capsys):
     from itdr_agent.human import CliReviewer
 
-    _cli_inputs(monkeypatch, ["edit", "   ", "approve"])
+    _cli_inputs(monkeypatch, ["edit", "   ", "   ", "approve"])  # blank step + blank rollback
     decision = CliReviewer().review_step(0, "Disable the account", "Re-enable it")
     assert decision.decision == "approve"
     assert "Please type approve, edit, or reject." in capsys.readouterr().out
@@ -202,3 +202,27 @@ def test_cli_reviewer_show_report_prints_the_summary(capsys):
     assert "Evidence supports unlikely-travel sign-ins." in out
     assert "T1078.004" in out
     assert "s1" in out
+
+
+# --- Problem #32: Edit can change the rollback (2026-10-16) -----------------
+
+
+def test_cli_edit_rollback_only(monkeypatch):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["edit", "", "Issue a new temporary password"])
+    decision = CliReviewer().review_step(
+        0, "Reset the password", "Revert the password to its previous value"
+    )
+    assert decision.decision == "edit"
+    assert decision.edited_step is None
+    assert decision.edited_rollback == "Issue a new temporary password"
+
+
+def test_cli_edit_both(monkeypatch):
+    from itdr_agent.human import CliReviewer
+
+    _cli_inputs(monkeypatch, ["edit", "Reset MFA", "Re-register after ID check"])
+    decision = CliReviewer().review_step(0, "Reset", "Restore old MFA")
+    assert (decision.edited_step, decision.edited_rollback) == (
+        "Reset MFA", "Re-register after ID check")

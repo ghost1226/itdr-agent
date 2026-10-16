@@ -651,3 +651,56 @@ def test_containment_decision_line_records_rollback_and_unsafe_flag(tmp_path):
     assert lines[0]["unsafe_rollback"] is True
     assert lines[1]["rollback"] == "User signs in again"
     assert lines[1]["unsafe_rollback"] is False
+
+
+# --- Problem #32: Edit can change the rollback (2026-10-16) -----------------
+
+UNSAFE_STEP = {"step": "Reset the user's password",
+               "rollback": "Revert the password to its previous value"}
+
+
+def _edit_run(tmp_path, decision):
+    from itdr_agent.human import ContainmentDecision
+
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(), [_report(containment_steps=[UNSAFE_STEP])],
+        reviewer=ScriptedReviewer(decisions=[ContainmentDecision(**decision)]),
+    )
+    result = orch.run({"id": "ALERT_001"})
+    (line,) = [e for e in _audit(audit) if e["event"] == "containment_decision"]
+    return result, line
+
+
+def test_edit_rollback_only_keeps_the_step(tmp_path):
+    result, line = _edit_run(tmp_path, dict(
+        decision="edit", edited_rollback="Issue a new temporary password"))
+    (step,) = result.report.containment_steps
+    assert step.step == UNSAFE_STEP["step"]
+    assert step.rollback == "Issue a new temporary password"
+    assert result.report.unsafe_rollbacks == []
+    assert line["rollback"] == UNSAFE_STEP["rollback"]
+    assert line["unsafe_rollback"] is True
+    assert line["final_rollback"] == "Issue a new temporary password"
+    assert line["final_unsafe_rollback"] is False
+
+
+def test_edited_rollback_that_is_still_unsafe_stays_flagged(tmp_path):
+    result, line = _edit_run(tmp_path, dict(
+        decision="edit", edited_rollback="Restore the old password"))
+    assert result.report.unsafe_rollbacks == [0]
+    assert line["final_unsafe_rollback"] is True
+
+
+def test_edit_with_nothing_changed_is_an_error(tmp_path):
+    from itdr_agent.orchestrator import OrchestrationError
+
+    with pytest.raises(OrchestrationError):
+        _edit_run(tmp_path, dict(decision="edit", edited_step="  ",
+                                 edited_rollback=""))
+
+
+def test_warning_tells_the_analyst_to_edit_the_rollback_or_reject():
+    from itdr_agent.adjudicator import UNSAFE_ROLLBACK_WARNING
+
+    assert "Edit the rollback" in UNSAFE_ROLLBACK_WARNING
+    assert "reject" in UNSAFE_ROLLBACK_WARNING.lower()
