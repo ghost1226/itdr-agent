@@ -620,8 +620,14 @@ def test_show_report_not_called_when_there_is_nothing_to_review(tmp_path):
         containment_steps=[],
         mitre_techniques_observed=[],
     )
+    # 3 sign-ins: enough history that the thin-evidence guard (#14) stays out.
+    history = [
+        {"id": f"s{i}", "createdDateTime": f"2025-01-15T0{i}:00:00Z",
+         "riskEventTypes_v2": []}
+        for i in range(3)
+    ]
     orch, _llm, _ = _orchestrator(
-        tmp_path, _dossier(), [report], reviewer=reviewer
+        tmp_path, _dossier(sign_in_history=history), [report], reviewer=reviewer
     )
     orch.run({"id": "ALERT_001", "userPrincipalName": ALICE})
     assert reviewer.shown == []

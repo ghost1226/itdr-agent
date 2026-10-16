@@ -85,6 +85,9 @@ class AdjudicatorOutput(BaseModel):
     # Set by code (adjudicator.apply_unsafe_rollback_guard), never by the model:
     # indexes of containment steps whose rollback would restore a credential.
     unsafe_rollbacks: list[int] = Field(default_factory=list)
+    # Set by code (adjudicator.apply_thin_evidence_guard), never by the model:
+    # a FALSE_POSITIVE on thin evidence was turned into INSUFFICIENT_DATA.
+    thin_evidence: bool = False
 
 
 CONFIDENCE_THRESHOLD = 0.7

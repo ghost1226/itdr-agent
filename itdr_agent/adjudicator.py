@@ -5,6 +5,8 @@ data and returns one JSON report conforming to ``AdjudicatorOutput``. All
 policy lives in code, never in the model's promise:
 
   * confidence < 0.7 coerces the verdict to ``INSUFFICIENT_DATA``;
+  * a FALSE_POSITIVE on thin evidence (fewer than 3 sign-ins and no audits)
+    becomes ``INSUFFICIENT_DATA`` unless an analyst answered (problem #14);
   * every MITRE technique in the report must appear in the dossier's
     ``mitre_attack_evidence`` — anything else is rejected, not trusted;
   * the dossier is serialized with ``<``/``>`` escaped inside
@@ -22,6 +24,7 @@ from typing import Any
 from .schemas import (
     AdjudicatorOutput,
     InvestigatorOutput,
+    Verdict,
     apply_confidence_guardrail,
 )
 from .tools import wrap_analyst_input, wrap_tool_output
@@ -69,6 +72,9 @@ SYSTEM_PROMPT = (
     "restore an old password or a previous MFA setup. To undo a password reset, "
     "issue a new temporary password; to undo an MFA reset, have the user "
     "re-register after verifying their identity.\n"
+    "Missing evidence is not evidence of benign activity. FALSE_POSITIVE means "
+    "the activity matches the user's normal behavior; if there is too little "
+    "history to show what normal looks like, answer INSUFFICIENT_DATA.\n"
 )
 
 # The agent executes nothing; it only recommends steps a human approves.
@@ -118,6 +124,16 @@ UNSAFE_ROLLBACK_NOTE = (
     "credential or MFA setup the attacker may know. Don't approve it as "
     "written; a safe undo issues a new temporary password or has the user "
     "re-register MFA after verifying identity."
+)
+
+# Problem #14: ALERT_009 (2 sign-ins, no audits) came back FALSE_POSITIVE at
+# 0.90+ in all 3 evaluation runs. "Benign" needs a baseline to compare against.
+MIN_BASELINE_SIGN_INS = 3
+
+THIN_EVIDENCE_NOTE = (
+    "Thin-evidence guard: the model said FALSE_POSITIVE, but the dossier has "
+    "{sign_ins} sign-in(s) and no directory audits, too little history to show "
+    "the activity is normal for this user. Verdict set to INSUFFICIENT_DATA."
 )
 
 ACTION_CLAIM_NOTE = (
@@ -203,6 +219,37 @@ def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
     return report
 
 
+def is_thin_evidence(dossier: InvestigatorOutput) -> bool:
+    """Too little history to establish the user's normal behavior."""
+    return (
+        len(dossier.sign_in_history) < MIN_BASELINE_SIGN_INS
+        and not dossier.directory_audits
+    )
+
+
+def apply_thin_evidence_guard(
+    report: AdjudicatorOutput, dossier: InvestigatorOutput
+) -> AdjudicatorOutput:
+    """A FALSE_POSITIVE on thin evidence becomes INSUFFICIENT_DATA.
+
+    Skipped once an analyst has answered: their context is the missing
+    baseline, so the re-adjudicated verdict stands.
+    """
+    analyst_answered = any(
+        a.status == "answered" for a in dossier.analyst_context
+    )
+    if (
+        report.verdict is Verdict.FALSE_POSITIVE
+        and is_thin_evidence(dossier)
+        and not analyst_answered
+    ):
+        note = THIN_EVIDENCE_NOTE.format(sign_ins=len(dossier.sign_in_history))
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+        report.verdict = Verdict.INSUFFICIENT_DATA
+        report.thin_evidence = True
+    return report
+
+
 def find_unsafe_rollbacks(report: AdjudicatorOutput) -> list[int]:
     """Indexes of containment steps whose rollback restores a credential."""
     return [
@@ -258,6 +305,7 @@ class Adjudicator:
         raw = self.llm.complete(messages)
         report = parse_adjudicator_output(raw)
         report = apply_confidence_guardrail(report)
+        report = apply_thin_evidence_guard(report, dossier)
         report = apply_action_claim_guard(report)
         report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)

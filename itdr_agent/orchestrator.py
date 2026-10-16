@@ -242,6 +242,18 @@ class Orchestrator:
                 },
             )
             raise
+        if report.thin_evidence:
+            self._append(
+                run_id,
+                {
+                    "event": "thin_evidence",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "model_verdict": "FALSE_POSITIVE",
+                    "sign_ins": len(dossier.sign_in_history),
+                    "directory_audits": len(dossier.directory_audits),
+                },
+            )
         if report.unsafe_rollbacks:
             self._append(
                 run_id,
