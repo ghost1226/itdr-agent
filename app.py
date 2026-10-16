@@ -35,6 +35,7 @@ from itdr_agent.fixture_store import get_store  # noqa: E402
 from itdr_agent.gui_run import GuiRun  # noqa: E402
 from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E402
+from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
 from itdr_agent.summary import (  # noqa: E402
     incident_note,
     severity,
@@ -78,7 +79,9 @@ def _offline_builder(alert_id: str, audit: Path):
             tool_executor=tool_executor,
         )
         adjudicator = Adjudicator(samples._MockCompleteLLM(reply))
-        return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit)
+        # Mock LLMs never report usage, so the page shows "no model calls".
+        return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit,
+                            token_meter=TokenMeter())
 
     return build
 
@@ -93,12 +96,16 @@ def _live_builder(model: str, audit: Path):
 
     def build(reviewer, tool_executor):
         key = config.OPENROUTER_API_KEY
+        meter = TokenMeter()
         investigator = Investigator(
-            _OpenRouterInvestigatorLLM(key, model, timeout),
+            _OpenRouterInvestigatorLLM(key, model, timeout, meter),
             tool_executor=tool_executor,
         )
-        adjudicator = Adjudicator(_OpenRouterAdjudicatorLLM(key, model, timeout))
-        return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit)
+        adjudicator = Adjudicator(
+            _OpenRouterAdjudicatorLLM(key, model, timeout, meter)
+        )
+        return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit,
+                            token_meter=meter)
 
     return build
 
@@ -292,6 +299,7 @@ def _report(run: GuiRun) -> None:
     # inside it, so it stays a code block rather than rendered markdown.
     st.code(incident_note(run.alert, result), language="text")
     st.text(f"Verdict: {report.verdict.value}    Confidence: {report.confidence:.2f}")
+    st.text(format_tokens(result.tokens))
     if result.short_circuited:
         st.info("Critical data gap: the model was not called.")
     st.markdown("**Narrative**")

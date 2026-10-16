@@ -19,10 +19,14 @@ from .fixture_store import get_store
 from .human import CliReviewer
 from .investigator import Investigator
 from .orchestrator import Orchestrator
+from .usage import TokenMeter, format_tokens
 
 
 class _OpenRouterInvestigatorLLM:
-    def __init__(self, api_key: str, model: str, timeout: int) -> None:
+    def __init__(
+        self, api_key: str, model: str, timeout: int,
+        meter: TokenMeter | None = None,
+    ) -> None:
         from openai import OpenAI
 
         self.client = OpenAI(
@@ -31,6 +35,7 @@ class _OpenRouterInvestigatorLLM:
             timeout=timeout,
         )
         self.model = model
+        self.meter = meter
 
     def next_action(self, messages: list[dict]) -> dict[str, Any]:
         response = self.client.chat.completions.create(
@@ -40,11 +45,16 @@ class _OpenRouterInvestigatorLLM:
             response_format={"type": "json_object"},
             max_tokens=config.MAX_OUTPUT_TOKENS,
         )
+        if self.meter is not None:
+            self.meter.add(getattr(response, "usage", None))
         return json.loads(response.choices[0].message.content or "{}")
 
 
 class _OpenRouterAdjudicatorLLM:
-    def __init__(self, api_key: str, model: str, timeout: int) -> None:
+    def __init__(
+        self, api_key: str, model: str, timeout: int,
+        meter: TokenMeter | None = None,
+    ) -> None:
         from openai import OpenAI
 
         self.client = OpenAI(
@@ -53,6 +63,7 @@ class _OpenRouterAdjudicatorLLM:
             timeout=timeout,
         )
         self.model = model
+        self.meter = meter
 
     def complete(self, messages: list[dict]) -> str:
         response = self.client.chat.completions.create(
@@ -62,6 +73,8 @@ class _OpenRouterAdjudicatorLLM:
             response_format={"type": "json_object"},
             max_tokens=config.MAX_OUTPUT_TOKENS,
         )
+        if self.meter is not None:
+            self.meter.add(getattr(response, "usage", None))
         return response.choices[0].message.content or ""
 
 
@@ -81,16 +94,18 @@ def main(argv: list[str] | None = None) -> int:
 
     model = os.getenv("EVAL_MODEL", DEFAULT_MODEL)
     timeout = min(config.TIMEOUT_SECONDS, 90)
+    meter = TokenMeter()
     investigator = Investigator(
-        _OpenRouterInvestigatorLLM(config.OPENROUTER_API_KEY, model, timeout)
+        _OpenRouterInvestigatorLLM(config.OPENROUTER_API_KEY, model, timeout, meter)
     )
     adjudicator = Adjudicator(
-        _OpenRouterAdjudicatorLLM(config.OPENROUTER_API_KEY, model, timeout)
+        _OpenRouterAdjudicatorLLM(config.OPENROUTER_API_KEY, model, timeout, meter)
     )
-    result = Orchestrator(investigator, adjudicator, CliReviewer()).run(
-        alerts[args.alert_id]
-    )
+    result = Orchestrator(
+        investigator, adjudicator, CliReviewer(), token_meter=meter
+    ).run(alerts[args.alert_id])
     print(result.report.model_dump_json(indent=2))
+    print(format_tokens(result.tokens))
     return 0
 
 

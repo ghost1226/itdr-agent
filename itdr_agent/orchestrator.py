@@ -11,7 +11,7 @@ Flow for one alert:
    ask stores exactly ``"no decision has been supplied"`` and does not
    re-adjudicate.
 5. Review each containment step: approve / edit / reject.
-6. Append a run entry (hashes, tool calls, counters) to ``logs/audit.jsonl``.
+6. Append a run entry (hashes, tool calls, counters, tokens) to ``logs/audit.jsonl``.
 
 Total timeout: ``timeout_seconds`` (``TIMEOUT_SECONDS``, default 120) caps the
 machine's time for one alert. The Investigator checks the deadline before each
@@ -43,6 +43,7 @@ from .adjudicator import (
 )
 from .human import Reviewer
 from .investigator import InvestigationTimeoutError
+from .usage import TokenMeter
 from .schemas import (
     CONFIDENCE_THRESHOLD,
     AdjudicatorOutput,
@@ -99,6 +100,7 @@ class OrchestrationResult:
     re_adjudications: int
     audit_path: Path
     run_id: str
+    tokens: dict[str, int] | None = None
 
 
 class Orchestrator:
@@ -112,6 +114,7 @@ class Orchestrator:
         audit_log: str | Path | None = None,
         timeout_seconds: int | None = None,
         clock: Callable[[], float] = time.monotonic,
+        token_meter: TokenMeter | None = None,
     ) -> None:
         self.investigator = investigator
         self.adjudicator = adjudicator
@@ -121,6 +124,7 @@ class Orchestrator:
             config.TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
         )
         self.clock = clock
+        self.token_meter = token_meter
         self._deadline = 0.0
         self._questions_asked = 0
         self._re_adjudications = 0
@@ -132,6 +136,8 @@ class Orchestrator:
     ) -> OrchestrationResult:
         self._questions_asked = 0
         self._re_adjudications = 0
+        if self.token_meter is not None:
+            self.token_meter.reset()
         self.audit_log.parent.mkdir(parents=True, exist_ok=True)
         alert_id = alert.get("id", "")
         run_id = run_id or f"{alert_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -182,6 +188,7 @@ class Orchestrator:
                 "llm_called": llm_called,
                 "questions_asked": self._questions_asked,
                 "re_adjudications": self._re_adjudications,
+                **self._token_fields(),
             },
         )
         return OrchestrationResult(
@@ -194,6 +201,7 @@ class Orchestrator:
             re_adjudications=self._re_adjudications,
             audit_path=self.audit_log,
             run_id=run_id,
+            tokens=self._tokens(),
         )
 
     # --- internals ---------------------------------------------------------
@@ -214,6 +222,7 @@ class Orchestrator:
                 "alert_id": alert_id,
                 "stage": stage,
                 "timeout_seconds": self.timeout_seconds,
+                **self._token_fields(),
             },
         )
 
@@ -404,6 +413,15 @@ class Orchestrator:
         report.containment_steps = kept
         report.unsafe_rollbacks = find_unsafe_rollbacks(report)  # final indexes
         return report
+
+    def _tokens(self) -> dict[str, int] | None:
+        return None if self.token_meter is None else self.token_meter.snapshot()
+
+    def _token_fields(self) -> dict[str, Any]:
+        """Audit fields; null (not 0) when nothing was counting."""
+        snap = self._tokens()
+        keys = ("tokens_in", "tokens_out", "llm_requests", "requests_without_usage")
+        return {k: (None if snap is None else snap[k]) for k in keys}
 
     def _append(self, run_id: str, entry: dict[str, Any]) -> None:
         entry = {"run_id": run_id, **entry}
