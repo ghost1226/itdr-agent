@@ -75,6 +75,24 @@ python -m itdr_agent --alert-id ALERT_001
 
 The agent investigates, may ask you one question if it is unsure, then shows each containment step for you to approve, edit, or reject. Every decision is written to `logs/audit.jsonl`. Alert ids are `ALERT_001` to `ALERT_010`.
 
+## Run the GUI
+
+A local web page for the same agent: pick an alert from the queue, watch the investigation, answer its question, and approve, edit, or reject each containment step. It runs on your own computer with your own key; nothing is hosted.
+
+```bash
+pip install -r requirements-gui.txt
+python -m streamlit run app.py
+```
+
+It opens at http://localhost:8501. Pick a mode in the sidebar:
+
+- **Offline demo:** no key, no model, no requests used. Scripted tool calls and a canned verdict, for trying the screens.
+- **Live:** the real model with the key in your `.env` (never shown on the page). Each alert uses about 6 to 8 of a free account's 50 daily requests.
+
+The Report shows the verdict, the MITRE techniques with the evidence behind each one, the steps you kept, a ready-to-paste incident note, the token use (`Tokens: … in / … out across N model calls`), and this run's lines from `logs/audit.jsonl`. The CLI prints the same token line after its report.
+
+Found a problem? Open an issue on the repo with what you clicked, what you expected, and what happened.
+
 ## Integration runs with a real model
 
 Unit tests never call a model. These scripts do, so they spend free-tier requests. Run them by hand only:
