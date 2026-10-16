@@ -29,8 +29,10 @@ from .schemas import (
 )
 from .tools import wrap_analyst_input, wrap_tool_output
 
-# Verified free on OpenRouter (see PROGRESS.md); override with EVAL_MODEL.
-DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+# The one default for the CLI, GUI, evaluation, and live scripts; override
+# with EVAL_MODEL. Nemotron 3 Super (free) since 2026-10-16: the earlier Gemma
+# 4 31B default kept hitting upstream rate limits (problems #11, #30).
+DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 
 class AdjudicatorError(Exception):

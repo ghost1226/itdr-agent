@@ -37,7 +37,7 @@ TIMEOUT_SECONDS=120
 
 - `OPENROUTER_API_KEY`: your own key from openrouter.ai (a free account works). `.env` is gitignored. Never commit it or paste it anywhere.
 - `TIMEOUT_SECONDS`: total time limit per investigation (default 120). Time a person spends answering the agent's question is not counted.
-- Optional: `EVAL_MODEL` picks the model for the CLI and the evaluation. `OPENROUTER_MODEL` is required by `scripts/run_investigator_live.py` only.
+- `EVAL_MODEL`: the model for the CLI, the GUI, the evaluation, and both live scripts. The default is `nvidia/nemotron-3-super-120b-a12b:free`; change it here to try another model. (`OPENROUTER_MODEL`, an older setting, still works for `scripts/run_investigator_live.py`.)
 
 ## Generate the synthetic data
 
@@ -98,7 +98,7 @@ Found a problem? Open an issue on the repo with what you clicked, what you expec
 Unit tests never call a model. These scripts do, so they spend free-tier requests. Run them by hand only:
 
 ```bash
-# Investigator only: prints the dossier as JSON (needs OPENROUTER_MODEL in .env)
+# Investigator only: prints the dossier as JSON (uses EVAL_MODEL)
 python scripts/run_investigator_live.py ALERT_001 > dossier.json
 
 # Adjudicator only, on that dossier (model is optional)
@@ -157,10 +157,10 @@ Both models were verified as free (prompt and completion price 0) on OpenRouter'
 
 | Use | Model | Context | Checked |
 |---|---|---|---|
-| CLI default, checkpoint 5 | `google/gemma-4-31b-it:free` | 262,144 tokens | checkpoint 5 (`230b571`) |
-| Evaluation | `nvidia/nemotron-3-super-120b-a12b:free` | 262,144 tokens | 2026-10-12 |
+| Checkpoint 5 (first live checks) | `google/gemma-4-31b-it:free` | 262,144 tokens | checkpoint 5 (`230b571`) |
+| Evaluation, and the default everywhere since 2026-10-16 | `nvidia/nemotron-3-super-120b-a12b:free` | 262,144 tokens | 2026-10-12 |
 
-The evaluation switched to Nemotron because Gemma was rate-limited by its provider. Free models can change or disappear, so results may not reproduce later. Free accounts get about 50 requests a day.
+The evaluation switched to Nemotron because Gemma was rate-limited by its provider; on 2026-10-16 Nemotron became the default for the CLI and GUI too, after a GUI run hit the same Gemma limit. Free models can change or disappear, so results may not reproduce later. Free accounts get about 50 requests a day.
 
 ## Dependency audit
 

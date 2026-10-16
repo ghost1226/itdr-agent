@@ -46,6 +46,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from itdr_agent import config  # noqa: E402
 from itdr_agent.adjudicator import (  # noqa: E402
+    DEFAULT_MODEL,
     Adjudicator,
     AdjudicatorParseError,
     UnsupportedMitreClaimError,
@@ -56,7 +57,7 @@ from itdr_agent.orchestrator import Orchestrator  # noqa: E402
 
 # Gemma 4 31B (free) was rate-limited upstream on 2026-10-12; Joe switched the
 # evaluation to Nemotron 3 Super (free), verified on OpenRouter the same day.
-EVAL_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+EVAL_DEFAULT_MODEL = DEFAULT_MODEL  # same default as the CLI and GUI
 RUNS_PER_ALERT = 3
 DEFAULT_DAILY_BUDGET = 45  # OpenRouter free tier allows 50/day
 MAX_REQUESTS_PER_MINUTE = 20

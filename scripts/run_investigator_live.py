@@ -1,8 +1,8 @@
 """Live Investigator runner — MANUAL ONLY, never imported by tests.
 
 Reads ``OPENROUTER_API_KEY`` from ``.env`` (via itdr_agent.config). Refuses
-to run without a key. This script is intentionally excluded from the test
-suite and must not be executed until Joe gives the go.
+to run without a key. Tests import only ``pick_model``; ``main()`` spends live
+requests and is never run by the test suite.
 
 Usage:
     python scripts/run_investigator_live.py ALERT_001
@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from itdr_agent import config  # noqa: E402
+from itdr_agent.adjudicator import DEFAULT_MODEL  # noqa: E402
 from itdr_agent.fixture_store import get_store  # noqa: E402
 from itdr_agent.investigator import Investigator  # noqa: E402
 
@@ -46,17 +47,22 @@ class OpenRouterLLM:
         return json.loads(response.choices[0].message.content)
 
 
+def pick_model() -> str:
+    """OPENROUTER_MODEL (older setting), then EVAL_MODEL, then the default."""
+    return (
+        os.getenv("OPENROUTER_MODEL")
+        or os.getenv("EVAL_MODEL")
+        or DEFAULT_MODEL
+    )
+
+
 def main() -> int:
     # Key comes from .env only; never hardcoded.
     if not config.OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY is not set. Add it to .env (gitignored).")
         return 2
 
-    # A free model must be verified before real use (Checkpoint 5 open item).
-    model = os.getenv("OPENROUTER_MODEL")
-    if not model:
-        print("Set OPENROUTER_MODEL in .env to a verified model id.")
-        return 2
+    model = pick_model()
 
     alert_id = sys.argv[1] if len(sys.argv) > 1 else "ALERT_001"
     alerts = {a["id"]: a for a in get_store().alerts}
