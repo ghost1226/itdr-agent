@@ -1,0 +1,120 @@
+"""Problem #14: confidently wrong on thin data (offline, mocked).
+
+ALERT_009 (a known user, 2 sign-ins, no audits) came back FALSE_POSITIVE at
+0.90+ in all 3 evaluation runs. A FALSE_POSITIVE says the activity matches the
+user's normal behavior, which thin evidence cannot show. Code turns such a
+verdict into INSUFFICIENT_DATA (so the analyst is asked), unless an analyst
+has already answered with context.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).parent))
+
+from itdr_agent import adjudicator as adj  # noqa: E402
+from itdr_agent.human import AskUserResult, ScriptedReviewer  # noqa: E402
+from itdr_agent.schemas import Verdict  # noqa: E402
+from test_orchestrator import (  # noqa: E402
+    _audit,
+    _dossier,
+    _orchestrator,
+    _report,
+)
+
+BENIGN = dict(
+    verdict="FALSE_POSITIVE",
+    confidence=0.92,
+    narrative="No risk signals; normal activity.",
+    containment_steps=[],
+    mitre_techniques_observed=[],
+)
+
+
+def _sign_ins(n: int) -> list[dict]:
+    return [
+        {"id": f"s{i}", "createdDateTime": f"2025-01-15T0{i}:00:00Z",
+         "riskEventTypes_v2": []}
+        for i in range(n)
+    ]
+
+
+def _thin(**overrides):
+    base = dict(
+        sign_in_history=_sign_ins(2),
+        directory_audits=[],
+        risk_indicators=[],
+        mitre_attack_mapping=[],
+        mitre_attack_evidence={},
+    )
+    base.update(overrides)
+    return _dossier(**base)
+
+
+def test_thin_rule():
+    assert adj.MIN_BASELINE_SIGN_INS == 3
+    assert adj.is_thin_evidence(_thin())
+    assert not adj.is_thin_evidence(_thin(sign_in_history=_sign_ins(3)))
+    # An audit record is evidence too (ALERT_004: 2 sign-ins + a consent audit).
+    assert not adj.is_thin_evidence(_thin(directory_audits=[{"id": "a1"}]))
+
+
+def test_thin_false_positive_becomes_insufficient_data(tmp_path):
+    orch, _llm, audit = _orchestrator(tmp_path, _thin(), [_report(**BENIGN)])
+    result = orch.run({"id": "ALERT_009"}, run_id="r-thin")
+    assert result.report.verdict is Verdict.INSUFFICIENT_DATA
+    assert result.report.thin_evidence is True
+    assert "Thin-evidence guard" in result.report.audit_notes
+    events = [e["event"] for e in _audit(audit)]
+    assert "thin_evidence" in events
+    (line,) = [e for e in _audit(audit) if e["event"] == "thin_evidence"]
+    assert line["sign_ins"] == 2 and line["directory_audits"] == 0
+    assert line["model_verdict"] == "FALSE_POSITIVE"
+    # INSUFFICIENT_DATA asks the analyst once (cancelled here: no re-run).
+    assert "ask_user" in events
+
+
+def test_enough_history_is_left_alone(tmp_path):
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _thin(sign_in_history=_sign_ins(3)), [_report(**BENIGN)]
+    )
+    result = orch.run({"id": "ALERT_006"})
+    assert result.report.verdict is Verdict.FALSE_POSITIVE
+    assert result.report.thin_evidence is False
+    assert "thin_evidence" not in [e["event"] for e in _audit(audit)]
+
+
+def test_other_verdicts_on_thin_data_are_left_alone(tmp_path):
+    orch, _llm, _audit_path = _orchestrator(
+        tmp_path, _thin(), [_report(verdict="SUSPICIOUS", confidence=0.8,
+                                    mitre_techniques_observed=[])]
+    )
+    result = orch.run({"id": "ALERT_009"})
+    assert result.report.verdict is Verdict.SUSPICIOUS
+    assert result.report.thin_evidence is False
+
+
+def test_an_analyst_answer_is_respected(tmp_path):
+    answered = AskUserResult(
+        status="answered",
+        answer="The activity is expected/benign",
+        choice_index=0,
+        free_text=False,
+    )
+    orch, llm, audit = _orchestrator(
+        tmp_path, _thin(),
+        [_report(**BENIGN), _report(**BENIGN)],
+        reviewer=ScriptedReviewer(answers=[answered]),
+    )
+    result = orch.run({"id": "ALERT_009"})
+    assert llm.calls == 2  # re-adjudicated with the analyst's context
+    assert result.report.verdict is Verdict.FALSE_POSITIVE
+    assert result.report.thin_evidence is False
+
+
+def test_prompt_says_missing_evidence_is_not_benign():
+    assert "Missing evidence is not evidence of benign activity" in adj.SYSTEM_PROMPT
