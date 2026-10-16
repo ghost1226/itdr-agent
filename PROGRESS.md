@@ -154,6 +154,11 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
   - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
   - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
+- ✅ Token counter (2026-10-16, Joe: "i want to add a token counter ... so we know how much token is being spent"; CLI + GUI + audit log):
+  - **Why:** only `scripts/evaluate.py` counted tokens; a normal CLI or GUI run spent tokens with no record.
+  - **Red:** `bf41698` — `tests/test_token_meter.py`, **11 failed, 336 passed**.
+  - **Green:** `3f9bf8a` — new `itdr_agent/usage.py` (`TokenMeter`, `format_tokens`); both OpenRouter wrappers record each reply's `usage` (before parsing, so a bad reply still counts); `Orchestrator(token_meter=...)` resets it per run and writes `tokens_in`, `tokens_out`, `llm_requests`, `requests_without_usage` into the `run` and `timeout` audit lines (null when no meter, never a fake 0); `OrchestrationResult.tokens`; CLI prints `Tokens: … in / … out across N model calls`; GUI report shows the same line (offline mocks → "no model calls"). **347 passed.** The eval harness keeps its own counter; finished eval numbers unchanged.
+  - **Live check:** CLI on ALERT_002 (Nemotron free) → COMPROMISED; printed `Tokens: 12,727 in / 2,168 out across 6 model calls`, and the audit `run` line matched exactly.
 - ✅ Problem #22: CLI reviewer approved by default (2026-10-14).
   - **Why:** `CliReviewer.review_step` returned `approve` for anything that was not exactly `edit`/`reject`, so a blank line or a typo approved a containment step with no human decision.
   - **Red:** `30d2503` — 8 new cases in `tests/test_human.py`; `pytest` → **5 failed, 296 passed** (301 tests).
@@ -424,3 +429,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `71143b7` — gui-batch1-summary-fix: green — SUSPICIOUS conclusion in the incident note
 - `33c00f8` — Merge PR #1: partner evaluation results (ALERT_004, 005, 007, 008, 010 x3)
 - `0924fc3` — Combined evaluation: 30 of 30 runs
+- `bf41698` — token-meter: red — per-run token totals in the CLI, GUI, and audit log
+- `3f9bf8a` — token-meter: green — TokenMeter per run; CLI, GUI, audit log
