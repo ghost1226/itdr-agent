@@ -42,6 +42,16 @@ CONCLUSIONS: dict[str, str] = {
 }
 
 
+# MITRE techniques the Investigator proved from evidence, in plain words.
+TECHNIQUE_WORDS: dict[str, str] = {
+    "T1078.004": "Unlikely travel",
+    "T1090.003": "Anonymous IP address",
+    "T1621": "MFA fatigue",
+    "T1528": "App consent after a risky sign-in",
+    "T1098.003": "Privileged role added",
+}
+
+
 def what(alert: dict[str, Any]) -> str:
     """The risk detections in plain words, joined with ``" + "``."""
     events = alert.get("riskEventTypes_v2") or []
@@ -74,6 +84,110 @@ def _place(alert: dict[str, Any]) -> str:
     return f"{city}, {country}" if country else city
 
 
+def found(alert: dict[str, Any], dossier: Any) -> str:
+    """The "What" after the investigation: the alert's own risk detections
+    plus every technique the evidence proved, de-duplicated. Before there is
+    a dossier, this is just ``what(alert)``.
+    """
+    evidence = getattr(dossier, "mitre_attack_evidence", None) or {}
+    events = alert.get("riskEventTypes_v2") or []
+    words = [RISK_EVENT_WORDS.get(event, event) for event in events]
+    for technique in sorted(evidence):
+        word = TECHNIQUE_WORDS.get(technique)
+        if word and word not in words:
+            words.append(word)
+    return " + ".join(words) if words else what(alert)
+
+
+def _sign_in_counts(dossier: Any) -> tuple[int, int, int, int]:
+    """Total, succeeded, failed with MFA denied, failed for other reasons."""
+    total = succeeded = denied = other = 0
+    for event in getattr(dossier, "sign_in_history", None) or []:
+        total += 1
+        status = event.get("status") or {}
+        if status.get("errorCode", 0) == 0:
+            succeeded += 1
+        elif "MFA" in (status.get("failureReason") or ""):
+            denied += 1
+        else:
+            other += 1
+    return total, succeeded, denied, other
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _log_facts(dossier: Any) -> str:
+    total, succeeded, denied, other = _sign_in_counts(dossier)
+    parts = []
+    if succeeded:
+        parts.append(f"{succeeded} succeeded")
+    if denied:
+        parts.append(f"{denied} failed with MFA denied")
+    if other:
+        parts.append(f"{other} failed for other reasons")
+    text = f"{_plural(total, 'sign-in')} in the window"
+    return f"{text}: {', '.join(parts)}" if parts and total else text
+
+
+def _verdict(report: Any) -> str:
+    return (
+        report.verdict.value
+        if hasattr(report.verdict, "value")
+        else str(report.verdict)
+    )
+
+
+def what_happened(alert: dict[str, Any], report: Any, dossier: Any) -> str:
+    """One sentence at the top of the verdict box, built by code only."""
+    sentences = [
+        f"{alert.get('userPrincipalName', '')} had {_log_facts(dossier)}.",
+        f"Alerted sign-in: {stage(alert)} on {alert.get('appDisplayName', '')} "
+        f"from {_place(alert)}.",
+    ]
+    evidence = getattr(dossier, "mitre_attack_evidence", None) or {}
+    if evidence:
+        named = [
+            f"{TECHNIQUE_WORDS.get(t, t)} ({t})" for t in sorted(evidence)
+        ]
+        sentences.append(f"Found: {', '.join(named)}.")
+    sentences.append(CONCLUSIONS.get(_verdict(report), ""))
+    return " ".join(s for s in sentences if s)
+
+
+def ticket_lines(alert: dict[str, Any], report: Any, dossier: Any) -> list[str]:
+    """Joe's incident-note format for the verdict box, before any review."""
+    finding = found(alert, dossier)
+    total, _succeeded, denied, other = _sign_in_counts(dossier)
+    failures = []
+    if denied:
+        failures.append(f"{denied} failed with MFA denied")
+    if other:
+        failures.append(f"{other} failed for other reasons")
+    logs = f"{_plural(total, 'sign-in')} in the window"
+    if failures:
+        logs += ", " + ", ".join(failures)
+    audits = len(getattr(dossier, "directory_audits", None) or [])
+    if audits:
+        logs += f", and {_plural(audits, 'directory audit change')}"
+    steps = [step.step for step in report.containment_steps]
+    action = (
+        "Proposed, each step needs your approval below: " + "; ".join(steps)
+        if steps
+        else "No containment proposed; monitor the user's account."
+    )
+    return [
+        f"Alert: {alert.get('id', '')}",
+        f"What: {finding} involving one user",
+        f"User: {alert.get('userPrincipalName', '')}",
+        f"Analysis: The user's account was flagged for {finding} on "
+        f"{alert.get('appDisplayName', '')} from {_place(alert)}. The sign-in "
+        f"logs show {logs}. IP reputation: not available in this dataset.",
+        f"Action: {action}",
+    ]
+
+
 def short_summary(alert: dict[str, Any]) -> str:
     """One line for the queue and the run header."""
     return (
@@ -90,11 +204,8 @@ def incident_note(alert: dict[str, Any], result: Any) -> str:
     report fields and alert fields on the allowlist are read.
     """
     report = result.report
-    verdict = (
-        report.verdict.value
-        if hasattr(report.verdict, "value")
-        else str(report.verdict)
-    )
+    verdict = _verdict(report)
+    finding = found(alert, getattr(result, "dossier", None))
     steps = [step.step for step in report.containment_steps]
     action = "; ".join(steps) if steps else "No action required"
     recommended = (
@@ -103,7 +214,7 @@ def incident_note(alert: dict[str, Any], result: Any) -> str:
         else "none"
     )
     analysis = (
-        f"Analysis: The affected user triggered {what(alert)} involving "
+        f"Analysis: The affected user triggered {finding} involving "
         f"{alert.get('appDisplayName', '')}. The sign-in originated from "
         f"{_place(alert)}. IP reputation: not available in this dataset. "
         f"Authentication result: {stage(alert)}.\n{report.narrative}"
@@ -111,7 +222,7 @@ def incident_note(alert: dict[str, Any], result: Any) -> str:
     return "\n".join(
         [
             f"Alert: {alert.get('id', '')}",
-            f"What: {what(alert)} involving one user",
+            f"What: {finding} involving one user",
             f"User: {alert.get('userPrincipalName', '')}",
             analysis,
             f"Conclusion: {CONCLUSIONS.get(verdict, '')} Stage: {stage(alert)}.",

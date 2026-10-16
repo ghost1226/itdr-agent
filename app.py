@@ -41,7 +41,9 @@ from itdr_agent.summary import (  # noqa: E402
     severity,
     short_summary,
     stage,
+    ticket_lines,
     what,
+    what_happened,
 )
 
 OFFLINE = "Offline demo (no key, no model)"
@@ -231,6 +233,8 @@ def _report_summary(run: GuiRun) -> None:
     if report is None:
         return
     with st.container(border=True):
+        st.markdown("**What happened:**")
+        st.text(what_happened(run.alert, report, dossier))
         st.markdown(
             f"**Verdict: {report.verdict.value}**  ·  confidence "
             f"{report.confidence:.2f}"
@@ -245,6 +249,7 @@ def _report_summary(run: GuiRun) -> None:
             )
             or "MITRE ATT&CK techniques: none"
         )
+        st.text("\n".join(ticket_lines(run.alert, report, dossier)))
 
 
 def _question(run: GuiRun) -> None:
