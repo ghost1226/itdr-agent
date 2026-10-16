@@ -171,11 +171,44 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 
 ## 8. Practical value
 
-_To be written. Needs Joe's manual baseline numbers._
+**The comparison.** Working one identity alert by hand (pull the user's profile, sign-in history, device, and audit records, decide, and write it up) takes Joe about 30 to 60 minutes [B1]. The agent gathers the evidence, gives a verdict, maps it to MITRE, and drafts containment with rollbacks in 44.3 seconds of machine time on average (26.4 to 82.1) [E1].
+
+| | By hand [B1] | Agent [E1] |
+|---|---|---|
+| One alert | 30 to 60 minutes | about 44 seconds of machine time, plus the analyst's review |
+| The 10 test alerts | 5 to 10 hours | about 7.4 minutes of machine time, plus review |
+
+**What that comparison leaves out.**
+- **The analyst still reviews every case.** A person reads the verdict and approves, edits, or rejects each containment step. That review time was not measured, because scoring used a scripted reviewer [E2]. The real saving is 30 to 60 minutes minus the review.
+- **The review can't be skipped.** Exact verdict accuracy is 80%, and on thin data the agent was confidently wrong in all 3 runs (section 7.4) [E1]. An unchecked FALSE_POSITIVE closes a case that should have stayed open.
+- **The by-hand time is one analyst's estimate,** not a timed study [B1].
+- **Synthetic alerts are cleaner than real ones** (section 7.1).
+
+**Where it helps.** In this evaluation every attack run was flagged and no benign run was called an attack [E1]. That makes the agent most useful as a first pass: the analyst starts from a verdict, the evidence behind it, and draft containment with rollbacks, instead of a blank ticket.
+
+**Cost.** $0 in model fees on the free tier, about 9,600 tokens in and 2,600 out per alert [E1]. Every run now records its token use in the CLI, the GUI, and the audit log, so the cost on a paid model can be measured instead of guessed [C5].
+
+### Citations (section 8)
+
+- **[B1]** Joe's estimate, given 2026-10-16: 30 to 60 minutes per identity alert, from his own SOC work. Not timed.
+- **[C5]** `itdr_agent/usage.py` (`TokenMeter`), `itdr_agent/orchestrator.py` (audit `run` line); commit `3f9bf8a`.
+- Also used: [E1], [E2] (defined under section 7).
+
+### Claims to verify (section 8)
+
+| Claim | Citation |
+|---|---|
+| 30 to 60 minutes per identity alert by hand | B1 |
+| 44.3 s average machine time (26.4-82.1); 10 alerts about 7.4 minutes | E1 |
+| Analyst review time not measured (scripted reviewer) | E2 |
+| 80% exact accuracy; ALERT_009 confidently wrong in all 3 runs | E1 |
+| Every attack run flagged; no benign run called an attack | E1 |
+| About 9,600 tokens in and 2,600 out per alert, $0 on the free tier | E1 |
+| Token use recorded in CLI, GUI, and audit log | C5 |
 
 ## 9. Citations and Claims to verify
 
-Section 7's citations and claims are listed under section 7. Section 8's will be added with it.
+Section 7's and section 8's citations and claims are listed under each section.
 
 ### Citations (sections 1-6)
 
