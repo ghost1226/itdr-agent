@@ -93,6 +93,50 @@ def filter_alert(alert: dict[str, Any]) -> dict[str, Any]:
     return {key: alert[key] for key in ALERT_FIELD_ALLOWLIST if key in alert}
 
 
+def _unique(values: Any) -> list[Any]:
+    seen: list[Any] = []
+    for value in values:
+        if value not in (None, "", []) and value not in seen:
+            seen.append(value)
+    return seen
+
+
+def summarize_tool_result(name: str, result: Any) -> Any:
+    """What the Investigator's model sees: enough to choose the next tool.
+
+    The model only picks tools, so raw sign-in records (most of the tokens,
+    resent on every turn) become a short summary. The full records still go
+    into the dossier, which the Adjudicator reads. Other tools pass through.
+    """
+    if name != "get_sign_in_history" or not isinstance(result, list) or not result:
+        return result
+    times = [r.get("createdDateTime") for r in result if r.get("createdDateTime")]
+    statuses = [r.get("status") or {} for r in result]
+    return {
+        "records": len(result),
+        "first": min(times) if times else None,
+        "last": max(times) if times else None,
+        "device_ids": _unique(
+            (r.get("deviceDetail") or {}).get("deviceId") for r in result
+        ),
+        "countries": _unique(
+            (r.get("location") or {}).get("countryOrRegion") for r in result
+        ),
+        "ip_addresses": _unique(r.get("ipAddress") for r in result),
+        "apps": _unique(r.get("appDisplayName") for r in result),
+        "failed_sign_ins": sum(1 for s in statuses if s.get("errorCode", 0) != 0),
+        "failure_reasons": _unique(s.get("failureReason") for s in statuses),
+        "risk_events": _unique(
+            e for r in result for e in (r.get("riskEventTypes_v2") or [])
+        ),
+        "risk_levels": _unique(
+            r.get("riskLevelDuringSignIn") for r in result
+            if r.get("riskLevelDuringSignIn") not in (None, "none")
+        ),
+        "note": "Summary for choosing tools; full records are kept as evidence.",
+    }
+
+
 def build_alert_prompt(alert: dict[str, Any]) -> str:
     """Serialize the allowlisted alert as wrapped, untrusted data."""
     return wrap_tool_output("alert", filter_alert(alert))
@@ -179,7 +223,12 @@ class Investigator:
             self._merge(evidence, name, result)
             messages.append({"role": "assistant", "content": json.dumps(action)})
             messages.append(
-                {"role": "user", "content": wrap_tool_output(name, result)}
+                {
+                    "role": "user",
+                    "content": wrap_tool_output(
+                        name, summarize_tool_result(name, result)
+                    ),
+                }
             )
 
         if evidence["user_profile"] is None:
