@@ -233,8 +233,6 @@ def _report_summary(run: GuiRun) -> None:
     if report is None:
         return
     with st.container(border=True):
-        st.markdown("**What happened:**")
-        st.text(what_happened(run.alert, report, dossier))
         st.markdown(
             f"**Verdict: {report.verdict.value}**  ·  confidence "
             f"{report.confidence:.2f}"
@@ -410,16 +408,29 @@ def _back_to_queue() -> bool:
     return st.button("Back to queue", key="back_to_queue")
 
 
+def _what_happened(run: GuiRun) -> None:
+    """Code-built summary, right below the alert line once there is a verdict."""
+    if run.result is not None:
+        report, dossier = run.result.report, run.result.dossier
+    else:
+        report, dossier = run.shown_report, run.shown_dossier
+    if report is None:
+        return
+    st.markdown("**What happened:**")
+    st.text(what_happened(run.alert, report, dossier))
+
+
 def _run_page(run: GuiRun) -> None:
     st.caption(f"Alert {run.alert['id']} for {run.alert['userPrincipalName']}")
     st.text(short_summary(run.alert))
+    status = run.wait(POLL_SECONDS)  # first, so a finished run shows its summary
+    _what_happened(run)
     if _back_to_queue():
         st.session_state.pop("run", None)
         st.session_state.pop("selected_alert", None)
         st.rerun()
     if st.session_state.get("flash"):
         st.error(st.session_state["flash"])
-    status = run.wait(POLL_SECONDS)
     if status == "running":
         # Update only the tool-call list in place while the model works; a
         # full-page rerun on every poll made the page flash (30-60 s live).
