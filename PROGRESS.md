@@ -154,6 +154,7 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Red:** `8642520` — `tests/test_max_tokens.py`, **3 failed**. Parses (never imports) the 4 live-call files and requires every `chat.completions.create` to pass `max_tokens=config.MAX_OUTPUT_TOKENS` (exactly 5 calls), plus a fake-client check on `evaluate._chat`.
   - **Green:** `7fefa50` — `config.MAX_OUTPUT_TOKENS = 8192` on all 5 calls; **293 passed**.
   - OpenRouter key replaced in `.env` the same day (value never written anywhere else; Joe to rotate it since it was pasted in a chat).
+- ✅ Edit can change the rollback (problem #32, 2026-10-16, Joe: "go ahead"): red `1b3fab2` (8 failed) → green `2606755` (387 passed). `ContainmentDecision.edited_rollback`; Edit takes a new step and/or a new rollback (blank keeps each; changing neither is an error / re-asks in the CLI); the edited rollback is re-checked (`is_unsafe_rollback`) and stays flagged if still unsafe; audit adds `final_rollback` + `final_unsafe_rollback`; GUI has a "New rollback" box; warning now says "Edit the rollback before approving, or reject the step." Two CLI tests got one extra input (the rollback prompt): `test_cli_reviewer_valid_edit`, `test_cli_reviewer_blank_edit_text_asks_again`.
 - ✅ Audit line records the rollback (problem #31, 2026-10-16, Joe: "go ahead"): red `02812a4` → green `9049423` (379 passed). Each `containment_decision` line now has `rollback` and `unsafe_rollback`. Only one rollback field: Edit changes the step text and keeps the original rollback, so the rollback cannot differ (see open problem 18).
 - ✅ One default model (problems #11 + #30, 2026-10-16, Joe: "yes"):
   - **Why:** the GUI and CLI still defaulted to Gemma 4 31B; Joe's first live GUI test hit Gemma's upstream 429 again. The eval has used Nemotron since 2026-10-12.
@@ -372,7 +373,7 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 15. **Shared test dossier is thin (2026-10-16).** 1 sign-in, no audits; one test adjusted to 3 sign-ins in `d12a110`.
 16. **Output tokens not fully explained (2026-10-16).** Likely hidden reasoning; unverified.
 17. **Eval records have no code version (2026-10-16).** `raw.jsonl` lacks a commit hash.
-18. **Edit can't fix an unsafe rollback (2026-10-16).** `ContainmentDecision` carries only `edited_step`; an edit keeps the original rollback. The unsafe-rollback warning says "Edit it before approving", which the analyst can't actually do, so the only safe choice today is Reject.
+18. ~~**Edit can't fix an unsafe rollback (2026-10-16).**~~ **Fixed 2026-10-16** (`2606755`). `ContainmentDecision` carries only `edited_step`; an edit keeps the original rollback. The unsafe-rollback warning says "Edit it before approving", which the analyst can't actually do, so the only safe choice today is Reject.
 
 Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): Joe's vault, "ITDR Agent — Build Journal", "Problems to talk about".
 
@@ -463,3 +464,5 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `f7a0c62` — default-model: green — Nemotron is the default; EVAL_MODEL overrides
 - `02812a4` — problem-31: red — audit line records the rollback
 - `9049423` — problem-31: green — rollback + unsafe_rollback in containment_decision
+- `1b3fab2` — problem-32: red — Edit can change the rollback
+- `2606755` — problem-32: green — editable rollback, re-checked, logged
