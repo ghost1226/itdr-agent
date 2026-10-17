@@ -116,5 +116,9 @@ def test_an_analyst_answer_is_respected(tmp_path):
     assert result.report.thin_evidence is False
 
 
-def test_prompt_says_missing_evidence_is_not_benign():
-    assert "Missing evidence is not evidence of benign activity" in adj.SYSTEM_PROMPT
+def test_prompt_leaves_thin_data_to_the_code_guard():
+    """Problem #33: with this rule in the prompt, the model answered
+    INSUFFICIENT_DATA on ALERT_006 and ALERT_008 (real history, benign).
+    The code guard alone catches the thin case (ALERT_009)."""
+    assert "Missing evidence" not in adj.SYSTEM_PROMPT
+    assert "too little history" not in adj.SYSTEM_PROMPT
