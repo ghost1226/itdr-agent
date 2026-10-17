@@ -74,10 +74,10 @@ SYSTEM_PROMPT = (
     "restore an old password or a previous MFA setup. To undo a password reset, "
     "issue a new temporary password; to undo an MFA reset, have the user "
     "re-register after verifying their identity.\n"
-    "Missing evidence is not evidence of benign activity. FALSE_POSITIVE means "
-    "the activity matches the user's normal behavior; if there is too little "
-    "history to show what normal looks like, answer INSUFFICIENT_DATA.\n"
 )
+# Thin evidence is handled in code (apply_thin_evidence_guard), not here:
+# a prompt rule made the model answer INSUFFICIENT_DATA on benign alerts
+# with real history (problem #33, after-fix eval 2026-10-16).
 
 # The agent executes nothing; it only recommends steps a human approves.
 # These patterns catch a report claiming otherwise (Nemotron wrote
