@@ -181,6 +181,10 @@ Full results: [`eval/final/results.md`](eval/final/results.md) (both halves comb
 
 **Results: 30 of 30 runs, 0 failed.** Exact verdict accuracy 80.0%, majority-of-3 80% (8 of 10 alerts), attack-vs-benign detection 100%, 0 of 9 benign runs flagged, MITRE precision 100% and recall 83.3%, agreement 93.3%, about 44 seconds per run. Two alerts were wrong by majority. On the thin-data alert, the model said FALSE_POSITIVE at 0.90+ confidence in all 3 runs instead of INSUFFICIENT_DATA; it treated missing evidence as proof that nothing happened. On the app-consent alert, it said SUSPICIOUS in 2 of 3 runs because the Investigator didn't pull the consent record. The full write-up is in the brief.
 
+### After-fix check
+
+After the evaluation, two fixes went in for the thin-data miss: a code guard that turns a FALSE_POSITIVE on too little history (fewer than 3 sign-ins and no audits in the user's last 7 days) into INSUFFICIENT_DATA, and the guard counting that history itself instead of trusting the window the model asked for. `eval/after-fix/` re-runs every alert **once** on the fixed code: 10 of 10 correct, 0 false positives, MITRE precision and recall 100%. The thin-data alert now comes back INSUFFICIENT_DATA, and the benign VPN alert is no longer flipped by the guard. One run per alert shows the fixes work; it is not a new accuracy number. The 30-run results above stay the headline.
+
 ### Reproduce it
 
 ```bash

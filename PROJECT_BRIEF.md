@@ -88,7 +88,7 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 
 - **False positives:** 0 of 9 benign runs were called COMPROMISED or SUSPICIOUS. One benign run (ALERT_006) fell back to INSUFFICIENT_DATA instead of FALSE_POSITIVE [E1].
 - **Attacks:** all 15 attack runs were flagged as COMPROMISED or SUSPICIOUS, so none was missed outright. 13 of 15 got the exact verdict with the correct MITRE technique. The 2 misses were ALERT_004 (app consent): the Investigator didn't gather the consent record, so the model said SUSPICIOUS and named no technique. In the third run it did gather it and said COMPROMISED with T1528 [E1].
-- **Confidently wrong on thin data.** ALERT_009 (a known user with 2 sign-ins and no audits; expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90 to 0.92 in all 3 runs. The model read missing evidence as proof that nothing happened, so the 0.70 guardrail never fired and the analyst was never asked [E1, P10]. In a real SOC that closes a case nobody actually checked. Any fix comes after the evaluation, with ALERT_009 re-run as a separate after-fix result [P10].
+- **Confidently wrong on thin data.** ALERT_009 (a known user with 2 sign-ins and no audits; expected INSUFFICIENT_DATA) came back FALSE_POSITIVE at 0.90 to 0.92 in all 3 runs. The model read missing evidence as proof that nothing happened, so the 0.70 guardrail never fired and the analyst was never asked [E1, P10]. In a real SOC that closes a case nobody actually checked. **After the evaluation** a code guard was added: a FALSE_POSITIVE with fewer than 3 sign-ins and no audits in the user's last 7 days becomes INSUFFICIENT_DATA, so the analyst is asked. The first version counted only what the Investigator fetched, and on the benign VPN alert (6 sign-ins, 2 fetched) it overrode a correct FALSE_POSITIVE; the guard now counts the 7 days itself [P10, P11]. In the after-fix check (1 run per alert, all 10 alerts) ALERT_009 came back INSUFFICIENT_DATA and all 10 were correct [E3]. One run each shows the fix works; it does not replace the 30-run numbers above.
 - **MITRE:** precision 100% (15 correct, 0 wrong), recall 83.3% (3 missed: the two ALERT_004 runs and one ALERT_007 run) [E1].
 - **Why that fallback happens.** Any verdict below 0.70 confidence is turned into INSUFFICIENT_DATA in code [C3]. That sends uncertain cases to the analyst instead of making a wrong call, but it costs analyst time.
 - **Small sample.** Ten alerts, three runs each, split across two people [P5]. The false-positive rate on real alert volume is unknown.
@@ -134,6 +134,8 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 - **[P8]** PROGRESS.md, "Checkpoint 7 fix 3" (the live ALERT_001 run, 2026-10-13).
 - **[P9]** PROGRESS.md, max-tokens fix (`8642520` / `7fefa50`, `config.MAX_OUTPUT_TOKENS = 8192`).
 - **[P10]** PROGRESS.md, Open Problem 10 ("Confidently wrong on thin data").
+- **[P11]** PROGRESS.md, "Guard counts its own baseline" (problem #34; `dd730bd` / `8e5db38`); `itdr_agent/adjudicator.py` (`fetch_baseline`, `BASELINE_HOURS = 168`, `apply_thin_evidence_guard`); `tests/test_thin_evidence.py`.
+- **[E3]** `eval/after-fix/results.md` and `eval/after-fix/raw.jsonl` (10 runs, 1 per alert, 2026-10-16 to 10-18); the pre-fix rows are in `raw-old-prompt.jsonl` and `raw-pre-fix-34.jsonl`.
 - **[X1]** OpenRouter, API rate limits: https://openrouter.ai/docs/api/reference/limits (checked 2026-10-13).
 
 ### Claims to verify (section 7)
@@ -156,6 +158,8 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 | MITRE claims checked in code | T5 |
 | 0 of 9 benign runs flagged; 15 of 15 attack runs flagged; 13 of 15 exact with correct technique | E1 |
 | ALERT_009 FALSE_POSITIVE at 0.90-0.92 in all 3 runs | E1, P10 |
+| Guard first counted only fetched sign-ins (ALERT_008: 2 of 6) and now counts 7 days itself | P11 |
+| After-fix: 10 of 10 correct, 1 run per alert, ALERT_009 INSUFFICIENT_DATA | E3 |
 | MITRE precision 100% (TP 15), recall 83.3% (FN 3) | E1 |
 | Below 0.70 becomes INSUFFICIENT_DATA | C3 |
 | Runs split between two people | P5 |
