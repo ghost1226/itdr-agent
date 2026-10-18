@@ -17,14 +17,21 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from itdr_agent import adjudicator as adj  # noqa: E402
+from itdr_agent.adjudicator import Adjudicator  # noqa: E402
 from itdr_agent.human import AskUserResult, ScriptedReviewer  # noqa: E402
 from itdr_agent.schemas import Verdict  # noqa: E402
 from test_orchestrator import (  # noqa: E402
+    CompleteLLM,
     _audit,
     _dossier,
     _orchestrator,
     _report,
 )
+
+# ALERT_009's user: 2 sign-ins and no audits in the fixtures over any window.
+THIN_USER = "user05@contoso.com"
+# ALERT_008's user: 6 sign-ins over 7 days, but only 2 in the default 24 hours.
+VPN_USER = "gina.vpn@contoso.com"
 
 BENIGN = dict(
     verdict="FALSE_POSITIVE",
@@ -45,6 +52,9 @@ def _sign_ins(n: int) -> list[dict]:
 
 def _thin(**overrides):
     base = dict(
+        alert_id="ALERT_009",
+        user_principal_name=THIN_USER,
+        user_profile={"userPrincipalName": THIN_USER},
         sign_in_history=_sign_ins(2),
         directory_audits=[],
         risk_indicators=[],
@@ -122,3 +132,63 @@ def test_prompt_leaves_thin_data_to_the_code_guard():
     The code guard alone catches the thin case (ALERT_009)."""
     assert "Missing evidence" not in adj.SYSTEM_PROMPT
     assert "too little history" not in adj.SYSTEM_PROMPT
+
+
+# --- Problem #34: the guard counted the model's window, not the user's history.
+# ALERT_008 (benign VPN) fetched 2 of 6 sign-ins (a short `hours` window); the
+# model said FALSE_POSITIVE and the guard wrongly flipped it. The guard now
+# looks up its own fixed baseline window in code.
+
+
+def test_baseline_window_is_seven_days():
+    assert adj.BASELINE_HOURS == 168
+    assert adj.fetch_baseline(VPN_USER) == (6, 0)
+    assert adj.fetch_baseline(THIN_USER) == (2, 0)
+    assert adj.fetch_baseline("ghost.user@contoso.com") == (0, 0)
+
+
+def test_short_window_with_real_history_is_not_thin(tmp_path):
+    dossier = _thin(
+        alert_id="ALERT_008",
+        user_principal_name=VPN_USER,
+        user_profile={"userPrincipalName": VPN_USER},
+    )
+    assert adj.is_thin_evidence(dossier, baseline=(6, 0)) is False
+    orch, _llm, audit = _orchestrator(tmp_path, dossier, [_report(**BENIGN)])
+    result = orch.run({"id": "ALERT_008"})
+    assert result.report.verdict is Verdict.FALSE_POSITIVE
+    assert result.report.thin_evidence is False
+    assert result.report.baseline_sign_ins == 6
+    assert "thin_evidence" not in [e["event"] for e in _audit(audit)]
+
+
+def test_baseline_audit_counts_as_evidence():
+    assert adj.is_thin_evidence(_thin(), baseline=(2, 1)) is False
+
+
+def test_thin_audit_line_reports_the_baseline_counts(tmp_path):
+    # Dossier holds 1 sign-in; the baseline lookup finds the user's 2.
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _thin(sign_in_history=_sign_ins(1)), [_report(**BENIGN)]
+    )
+    result = orch.run({"id": "ALERT_009"})
+    assert result.report.verdict is Verdict.INSUFFICIENT_DATA
+    assert result.report.baseline_sign_ins == 2
+    (line,) = [e for e in _audit(audit) if e["event"] == "thin_evidence"]
+    assert line["sign_ins"] == 2 and line["directory_audits"] == 0
+
+
+def test_baseline_can_be_turned_off():
+    report = Adjudicator(CompleteLLM([_report(**BENIGN)]), baseline=None).adjudicate(
+        _thin(user_principal_name=VPN_USER)
+    )
+    assert report.verdict is Verdict.INSUFFICIENT_DATA
+    assert report.baseline_sign_ins is None
+
+
+def test_model_cannot_set_the_baseline_counts():
+    raw = _report(**BENIGN, baseline_sign_ins=99, baseline_directory_audits=5)
+    report = Adjudicator(CompleteLLM([raw])).adjudicate(_thin())
+    assert report.baseline_sign_ins == 2
+    assert report.baseline_directory_audits == 0
+    assert report.verdict is Verdict.INSUFFICIENT_DATA
