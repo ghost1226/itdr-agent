@@ -251,8 +251,16 @@ class Orchestrator:
                     "timestamp": _now(),
                     "alert_id": dossier.alert_id,
                     "model_verdict": "FALSE_POSITIVE",
-                    "sign_ins": len(dossier.sign_in_history),
-                    "directory_audits": len(dossier.directory_audits),
+                    "sign_ins": (
+                        report.baseline_sign_ins
+                        if report.baseline_sign_ins is not None
+                        else len(dossier.sign_in_history)
+                    ),
+                    "directory_audits": (
+                        report.baseline_directory_audits
+                        if report.baseline_directory_audits is not None
+                        else len(dossier.directory_audits)
+                    ),
                 },
             )
         if report.unsafe_rollbacks:

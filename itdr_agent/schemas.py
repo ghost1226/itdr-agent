@@ -88,6 +88,10 @@ class AdjudicatorOutput(BaseModel):
     # Set by code (adjudicator.apply_thin_evidence_guard), never by the model:
     # a FALSE_POSITIVE on thin evidence was turned into INSUFFICIENT_DATA.
     thin_evidence: bool = False
+    # Set by code (adjudicator.apply_thin_evidence_guard), never by the model:
+    # the user's sign-ins / directory audits the guard counted (problem #34).
+    baseline_sign_ins: int | None = None
+    baseline_directory_audits: int | None = None
 
 
 CONFIDENCE_THRESHOLD = 0.7

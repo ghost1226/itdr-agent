@@ -7,6 +7,8 @@ policy lives in code, never in the model's promise:
   * confidence < 0.7 coerces the verdict to ``INSUFFICIENT_DATA``;
   * a FALSE_POSITIVE on thin evidence (fewer than 3 sign-ins and no audits)
     becomes ``INSUFFICIENT_DATA`` unless an analyst answered (problem #14);
+    the guard counts the user's last 7 days itself, not the model's window
+    (problem #34);
   * every MITRE technique in the report must appear in the dossier's
     ``mitre_attack_evidence`` — anything else is rejected, not trusted;
   * the dossier is serialized with ``<``/``>`` escaped inside
@@ -19,7 +21,7 @@ The free-model id is verified in PROGRESS.md. The live integration script
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .schemas import (
     AdjudicatorOutput,
@@ -27,6 +29,7 @@ from .schemas import (
     Verdict,
     apply_confidence_guardrail,
 )
+from . import sim_api
 from .tools import wrap_analyst_input, wrap_tool_output
 
 # The one default for the CLI, GUI, evaluation, and live scripts; override
@@ -133,9 +136,14 @@ UNSAFE_ROLLBACK_NOTE = (
 # 0.90+ in all 3 evaluation runs. "Benign" needs a baseline to compare against.
 MIN_BASELINE_SIGN_INS = 3
 
+# Problem #34: the guard counted the dossier, i.e. whatever window the model
+# asked for. ALERT_008 fetched 2 of its 6 sign-ins and a correct FALSE_POSITIVE
+# was flipped. The guard now counts a fixed window itself.
+BASELINE_HOURS = 168
+
 THIN_EVIDENCE_NOTE = (
-    "Thin-evidence guard: the model said FALSE_POSITIVE, but the dossier has "
-    "{sign_ins} sign-in(s) and no directory audits, too little history to show "
+    "Thin-evidence guard: the model said FALSE_POSITIVE, but only {sign_ins} "
+    "sign-in(s) and no directory audits were found, too little history to show "
     "the activity is normal for this user. Verdict set to INSUFFICIENT_DATA."
 )
 
@@ -222,31 +230,55 @@ def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
     return report
 
 
-def is_thin_evidence(dossier: InvestigatorOutput) -> bool:
-    """Too little history to establish the user's normal behavior."""
+def fetch_baseline(upn: str) -> tuple[int, int]:
+    """The user's sign-ins and directory audits over the last 7 days."""
     return (
-        len(dossier.sign_in_history) < MIN_BASELINE_SIGN_INS
-        and not dossier.directory_audits
+        len(sim_api.get_sign_in_history(upn, hours=BASELINE_HOURS)),
+        len(sim_api.get_directory_audits(upn, hours=BASELINE_HOURS)),
     )
 
 
+def _evidence_counts(
+    dossier: InvestigatorOutput, baseline: tuple[int, int] | None
+) -> tuple[int, int]:
+    sign_ins = len(dossier.sign_in_history)
+    audits = len(dossier.directory_audits)
+    if baseline is not None:
+        sign_ins, audits = max(sign_ins, baseline[0]), max(audits, baseline[1])
+    return sign_ins, audits
+
+
+def is_thin_evidence(
+    dossier: InvestigatorOutput, baseline: tuple[int, int] | None = None
+) -> bool:
+    """Too little history to establish the user's normal behavior."""
+    sign_ins, audits = _evidence_counts(dossier, baseline)
+    return sign_ins < MIN_BASELINE_SIGN_INS and not audits
+
+
 def apply_thin_evidence_guard(
-    report: AdjudicatorOutput, dossier: InvestigatorOutput
+    report: AdjudicatorOutput,
+    dossier: InvestigatorOutput,
+    baseline: tuple[int, int] | None = None,
 ) -> AdjudicatorOutput:
     """A FALSE_POSITIVE on thin evidence becomes INSUFFICIENT_DATA.
 
-    Skipped once an analyst has answered: their context is the missing
-    baseline, so the re-adjudicated verdict stands.
+    ``baseline`` is the guard's own count of the user's history; without it
+    only the dossier is counted. Skipped once an analyst has answered: their
+    context is the missing baseline, so the re-adjudicated verdict stands.
     """
+    sign_ins, audits = _evidence_counts(dossier, baseline)
+    report.baseline_sign_ins = sign_ins if baseline is not None else None
+    report.baseline_directory_audits = audits if baseline is not None else None
     analyst_answered = any(
         a.status == "answered" for a in dossier.analyst_context
     )
     if (
         report.verdict is Verdict.FALSE_POSITIVE
-        and is_thin_evidence(dossier)
+        and is_thin_evidence(dossier, baseline)
         and not analyst_answered
     ):
-        note = THIN_EVIDENCE_NOTE.format(sign_ins=len(dossier.sign_in_history))
+        note = THIN_EVIDENCE_NOTE.format(sign_ins=sign_ins)
         report.audit_notes = f"{report.audit_notes}\n{note}".strip()
         report.verdict = Verdict.INSUFFICIENT_DATA
         report.thin_evidence = True
@@ -305,15 +337,23 @@ def assert_mitre_claims_supported(
 class Adjudicator:
     """Single-shot structured-reasoning agent over a dossier."""
 
-    def __init__(self, llm: Any) -> None:
+    def __init__(
+        self,
+        llm: Any,
+        baseline: Callable[[str], tuple[int, int]] | None = fetch_baseline,
+    ) -> None:
         self.llm = llm
+        self.baseline = baseline
 
     def adjudicate(self, dossier: InvestigatorOutput) -> AdjudicatorOutput:
         messages = build_adjudicator_prompt(dossier)
         raw = self.llm.complete(messages)
         report = parse_adjudicator_output(raw)
         report = apply_confidence_guardrail(report)
-        report = apply_thin_evidence_guard(report, dossier)
+        baseline = (
+            self.baseline(dossier.user_principal_name) if self.baseline else None
+        )
+        report = apply_thin_evidence_guard(report, dossier, baseline)
         report = apply_action_claim_guard(report)
         report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)
