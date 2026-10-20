@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, starting with logging.
+- **What's next:** the **ITDR Dream Run 1** fixes, starting with `scripts/check_progress.py`.
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -194,6 +194,7 @@
   - Review: frozen eval files 0-line diff, `ScriptedReviewer` byte-identical; 0 IP / answer-key leaks across all 10 alerts x 4 verdicts; offline Chrome click-through (queue → search → open → verdict above step → approve → incident note → Closed).
   - Open: Back to queue while a run waits on the analyst drops that run (thread stays blocked, status stuck at "Waiting on you").
 - ✅ Skill doc sync (2026-10-20, Joe: "one fix only"): `.agents/skills/untrusted-data-wrapping/SKILL.md` rule 1 now reads "replace `<` with `\u003c` and `>` with `\u003e`" — the escape codes had been lost (it read "replace `<` with `<` and `>` with `>`"). Matches `itdr_agent/tools.py` (`wrap_tool_output`, `wrap_analyst_input`). Doc only; no code or tests changed. Commit `b0eabad`.
+- ✅ Progress checker (2026-10-20, Dream Run 1 item 3): `scripts/check_progress.py` exits 1 and prints the 7-char hash of any commit newer than the `d33eb1e` baseline that is missing from PROGRESS.md; HEAD is skipped (a commit cannot contain its own hash) and older commits are not checked (their hashes live in the frozen pre-move repo). 5 new tests (`tests/test_check_progress.py`) run against a temp git repo. Red `1145502`. AGENTS.md rule 10 now says to run it before calling a task done.
 
 ## Microsoft Graph Schema Sources
 
@@ -242,7 +243,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**The ITDR Dream Run 1 fixes, starting with logging** — the next work after the evaluation. The list, in order:
+**The ITDR Dream Run 1 fixes, starting with `scripts/check_progress.py`** — the next work after the evaluation. The list, in order:
 
 1. DONE: skill escape codes (`b0eabad`)
 2. DONE: PROGRESS sync (`f2c5c0a`)
@@ -499,3 +500,6 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `2316e52` — problem-33: update PROGRESS.md
 - `b32c8d6` — after-fix eval complete (1 run per alert) + README/brief/PROGRESS notes
 - `b0eabad` — skill-doc: restore lost escape codes in untrusted-data-wrapping rule 1
+- `19a9fc1` — PROGRESS: reopen problem 14 (Investigator skips needed tools); correct pre-move hash note
+- `d33eb1e` — PROGRESS: list the ITDR Dream Run 1 fixes in What's Next
+- `1145502` — check-progress: red — tests for scripts/check_progress.py (temp git repo)
