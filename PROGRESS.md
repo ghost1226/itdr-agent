@@ -193,6 +193,7 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Fix found in review:** `SUSPICIOUS` had no conclusion line. Red `3331ca2` / green `71143b7` (+ a test that every `Verdict` has one). **336 passed.**
   - Review: frozen eval files 0-line diff, `ScriptedReviewer` byte-identical; 0 IP / answer-key leaks across all 10 alerts x 4 verdicts; offline Chrome click-through (queue → search → open → verdict above step → approve → incident note → Closed).
   - Open: Back to queue while a run waits on the analyst drops that run (thread stays blocked, status stuck at "Waiting on you").
+- ✅ Skill doc sync (2026-10-20, Joe: "one fix only"): `.agents/skills/untrusted-data-wrapping/SKILL.md` rule 1 now reads "replace `<` with `\u003c` and `>` with `\u003e`" — the escape codes had been lost (it read "replace `<` with `<` and `>` with `>`"). Matches `itdr_agent/tools.py` (`wrap_tool_output`, `wrap_analyst_input`). Doc only; no code or tests changed.
 
 ## Microsoft Graph Schema Sources
 

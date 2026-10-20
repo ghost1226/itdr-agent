@@ -9,7 +9,7 @@ Sign-in logs and audit events can hold text an attacker controls: a display name
 
 ## The rules
 
-1. **Everything from the data gets wrapped.** Tool output, the alert record, dossier evidence: `json.dumps`, then replace `<` with `<` and `>` with `>`, then wrap once in `<microsoft_graph_data tool="..." untrusted="true">`. The body is still valid JSON, and the closing tag can only appear once.
+1. **Everything from the data gets wrapped.** Tool output, the alert record, dossier evidence: `json.dumps`, then replace `<` with `\u003c` and `>` with `\u003e`, then wrap once in `<microsoft_graph_data tool="..." untrusted="true">`. The body is still valid JSON, and the closing tag can only appear once.
 2. **Attributes come from code, never from data.** The `tool` name in the opening tag comes from `TOOL_SPECS`, not from a record or from the model's own reply.
 3. **The model sees evidence, never labels.** Pass the model an allowlist of fields, not the whole record. `scenario`, `expected_verdict`, `expected_mitre`, `is_benign`, and any other ground truth stay out of every prompt. Ground truth lives in its own file (e.g. `data/fixtures/ground_truth.jsonl`, keyed by alert id), which only the tests and `scripts/evaluate.py` read.
 4. **No raw data outside the wrapper.** The alert goes in the same wrapper as tool output. The only unwrapped text in a prompt is text this project wrote: the system prompt, tool specs, instructions.
