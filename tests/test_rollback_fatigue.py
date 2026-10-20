@@ -99,3 +99,19 @@ def test_safe_rollback_on_a_known_step_is_left_alone():
     report = _adjudicate([{"step": "Reset the password", "rollback": safe}])
     assert report.containment_steps[0].rollback == safe
     assert report.standard_rollbacks == []
+
+
+def test_standard_rollback_is_logged_and_the_analyst_sees_no_warning(tmp_path):
+    from test_orchestrator import _audit, _orchestrator
+
+    steps = [{"step": "Force a password reset",
+              "rollback": "Revert the password to its previous value"}]
+    orch, _llm, audit = _orchestrator(tmp_path, _dossier(), [_report(containment_steps=steps)])
+    result = orch.run({"id": "ALERT_001"}, run_id="r-std")
+    events = _audit(audit)
+    assert [e["step_indexes"] for e in events if e["event"] == "standard_rollback"] == [[0]]
+    assert not [e for e in events if e["event"] == "unsafe_rollback"]
+    (line,) = [e for e in events if e["event"] == "containment_decision"]
+    assert line["rollback"] == adj.STANDARD_ROLLBACKS["password_reset"]
+    assert line["unsafe_rollback"] is False
+    assert result.report.unsafe_rollbacks == []

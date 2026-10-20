@@ -538,7 +538,7 @@ class WarningRecorder(ScriptedReviewer):
 def test_unsafe_rollback_is_shown_to_the_reviewer_and_logged(tmp_path):
     steps = [
         {"step": "Disable the account", "rollback": "Re-enable if benign"},
-        {"step": "Force password reset", "rollback": "Revert the password to its previous value."},
+        {"step": "Lock the account", "rollback": "Revert the password to its previous value."},
     ]
     reviewer = WarningRecorder()
     orch, _llm, audit = _orchestrator(
@@ -649,7 +649,7 @@ def test_show_report_not_called_when_there_is_nothing_to_review(tmp_path):
 def test_containment_decision_line_records_rollback_and_unsafe_flag(tmp_path):
     report = _report(
         containment_steps=[
-            {"step": "Reset the user's password",
+            {"step": "Lock the account",
              "rollback": "Revert the password to its previous value"},
             {"step": "Revoke sessions", "rollback": "User signs in again"},
         ]
@@ -665,7 +665,9 @@ def test_containment_decision_line_records_rollback_and_unsafe_flag(tmp_path):
 
 # --- Problem #32: Edit can change the rollback (2026-10-16) -----------------
 
-UNSAFE_STEP = {"step": "Reset the user's password",
+# A step code doesn't recognize, so the unsafe rollback reaches the analyst
+# (a password reset would get code's standard rollback, Dream Run 1 item 10).
+UNSAFE_STEP = {"step": "Lock the account",
                "rollback": "Revert the password to its previous value"}
 
 

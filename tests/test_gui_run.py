@@ -202,7 +202,7 @@ def test_unknown_decision_is_refused(tmp_path):
 
 
 def test_unsafe_rollback_warning_reaches_the_page(tmp_path):
-    steps = [{"step": "Reset the password",
+    steps = [{"step": "Lock the account",
               "rollback": "Restore the old password"}]
     run, _, _ = _make(tmp_path, [_report(containment_steps=steps)])
     run.start()

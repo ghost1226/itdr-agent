@@ -376,7 +376,7 @@ def test_adjudicator_flags_but_does_not_reject_an_unsafe_rollback():
 
     steps = [
         {"step": "Revoke refresh tokens", "rollback": "Re-enable after review"},
-        {"step": "Force password reset", "rollback": "Revert the password to its previous value."},
+        {"step": "Lock the account", "rollback": "Revert the password to its previous value."},
     ]
     report = Adjudicator(MockLLM(_report(containment_steps=steps))).adjudicate(_dossier())
     assert report.verdict is Verdict.COMPROMISED

@@ -100,6 +100,9 @@ class AdjudicatorOutput(BaseModel):
     # Set by code (adjudicator.apply_no_containment_guard), never by the model:
     # containment steps moved to recommended actions on a benign/unknown verdict.
     moved_containment_steps: int = 0
+    # Set by code (adjudicator.apply_standard_rollbacks), never by the model:
+    # indexes of steps whose unsafe rollback code replaced with a safe one.
+    standard_rollbacks: list[int] = Field(default_factory=list)
 
 
 CONFIDENCE_THRESHOLD = 0.7

@@ -121,6 +121,48 @@ _UNSAFE_ROLLBACK_PATTERNS = [
     re.compile(_RB_VERB + r"[^.;]{0,25}?" + _RB_CRED + r"\w*[^.;]{0,25}?" + _RB_OLD, re.IGNORECASE),
 ]
 
+# Dream Run 1 item 10: the guard flagged all 5 after-fix COMPROMISED runs. The
+# prompt says "never restore an old password", and the model echoes it ("do
+# not restore the previous password"). A negation within 3 words before the
+# verb makes the phrase safe; "Without verifying, restore..." is still unsafe.
+_RB_NEGATION = re.compile(
+    r"\b(?:not|never|don't|dont|avoid|without)\s+(?:\w+\s+){0,2}$", re.IGNORECASE
+)
+
+# Known one-way steps get a standard safe rollback from code when the model's
+# rollback is unsafe; a step code doesn't recognize keeps the warning.
+_ONE_WAY_STEPS = {
+    "password_reset": re.compile(
+        r"\bpassword\s+reset\b|\b(?:reset|change|rotate)\b[^.;]{0,30}\bpassword",
+        re.IGNORECASE,
+    ),
+    "mfa_reregister": re.compile(
+        r"\b(?:re-?register|re-?enrol+|reset)\b[^.;]{0,30}" + _RB_CRED
+        + r"|" + _RB_CRED + r"\w*[^.;]{0,30}\bre-?(?:register|enrol)",
+        re.IGNORECASE,
+    ),
+    "session_revoke": re.compile(
+        r"\brevoke\b[^.;]{0,40}\b(?:session|token)", re.IGNORECASE
+    ),
+}
+STANDARD_ROLLBACKS = {
+    "password_reset": (
+        "Issue a new temporary password after verifying the user's identity "
+        "(never the old one)."
+    ),
+    "mfa_reregister": (
+        "Have the user register a new MFA method after verifying their "
+        "identity (never the old setup)."
+    ),
+    "session_revoke": (
+        "No undo needed: the user signs in again with new credentials."
+    ),
+}
+STANDARD_ROLLBACK_NOTE = (
+    "Standard-rollback guard: step {index}'s rollback would restore a "
+    "credential, so code replaced it. The model wrote: \"{original}\""
+)
+
 UNSAFE_ROLLBACK_WARNING = (
     "This rollback would restore a credential or MFA setup the attacker may "
     "know. Edit the rollback before approving, or reject the step (a safe "
@@ -317,8 +359,39 @@ def apply_no_containment_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
 
 
 def is_unsafe_rollback(text: str) -> bool:
-    """True if a rollback would restore a credential or MFA setup."""
-    return any(p.search(text) for p in _UNSAFE_ROLLBACK_PATTERNS)
+    """True if a rollback would restore a credential or MFA setup.
+
+    A match negated just before its verb ("do not restore the old password")
+    is the safe instruction, not an unsafe rollback.
+    """
+    for pattern in _UNSAFE_ROLLBACK_PATTERNS:
+        for match in pattern.finditer(text):
+            clause = _SENTENCE_BREAK.split(text[: match.start()])[-1]
+            if not _RB_NEGATION.search(clause):
+                return True
+    return False
+
+
+def _one_way_kind(step: str) -> str | None:
+    for kind, pattern in _ONE_WAY_STEPS.items():
+        if pattern.search(step):
+            return kind
+    return None
+
+
+def apply_standard_rollbacks(report: AdjudicatorOutput) -> AdjudicatorOutput:
+    """Swap an unsafe rollback on a known one-way step for code's safe one."""
+    replaced: list[int] = []
+    for index, step in enumerate(report.containment_steps):
+        kind = _one_way_kind(step.step)
+        if kind is None or not is_unsafe_rollback(step.rollback):
+            continue
+        note = STANDARD_ROLLBACK_NOTE.format(index=index, original=step.rollback)
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+        step.rollback = STANDARD_ROLLBACKS[kind]
+        replaced.append(index)
+    report.standard_rollbacks = replaced
+    return report
 
 
 def find_unsafe_rollbacks(report: AdjudicatorOutput) -> list[int]:
@@ -394,6 +467,7 @@ class Adjudicator:
         report = apply_thin_evidence_guard(report, dossier, baseline)
         report = apply_no_containment_guard(report)
         report = apply_action_claim_guard(report)
+        report = apply_standard_rollbacks(report)
         report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)
         return report

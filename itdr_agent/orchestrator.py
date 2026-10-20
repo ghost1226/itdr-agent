@@ -389,6 +389,16 @@ class Orchestrator:
                     "steps": report.moved_containment_steps,
                 },
             )
+        if report.standard_rollbacks:
+            self._append(
+                run_id,
+                {
+                    "event": "standard_rollback",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "step_indexes": report.standard_rollbacks,
+                },
+            )
         if report.unsafe_rollbacks:
             self._append(
                 run_id,
