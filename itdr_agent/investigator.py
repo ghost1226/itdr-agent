@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from .adjudicator import BASELINE_HOURS
 from .data_generator import ALERT_FIELD_ALLOWLIST
 from .schemas import InvestigatorOutput
 from .sim_api import SimulatedGraphError
@@ -183,6 +184,44 @@ class Investigator:
             {"role": "user", "content": build_alert_prompt(alert)},
         ]
 
+        # Dream Run 1 items 5-6: pre-fetch the three cheapest, always-needed
+        # tools in code, so the model starts with evidence. These do not count
+        # toward MAX_TOOL_CALLS; the model still gets its own 8 turns and may
+        # re-call a tool with a different window.
+        for name, arguments in (
+            ("get_user_profile", {"upn": upn}),
+            ("get_sign_in_history", {"upn": upn, "hours": BASELINE_HOURS}),
+            ("get_directory_audits", {"upn": upn, "hours": BASELINE_HOURS}),
+        ):
+            result = self._prefetch(name, arguments, data_gaps)
+            if result is not _FAILED:
+                self._merge(evidence, name, result)
+            shown = (
+                result
+                if result is not _FAILED
+                else {"error": "failed after one retry"}
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {"action": "tool", "tool": name, "arguments": arguments}
+                    ),
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": wrap_tool_output(
+                        name, summarize_tool_result(name, shown)
+                    ),
+                }
+            )
+
+        if evidence["user_profile"] is None or not evidence["sign_in_history"]:
+            # Critical gap: return the dossier now, with zero model calls.
+            return self._build_dossier(alert, upn, evidence, data_gaps)
+
         while True:
             if self.deadline is not None and self.clock() >= self.deadline:
                 raise InvestigationTimeoutError(
@@ -233,11 +272,19 @@ class Investigator:
                 }
             )
 
+        return self._build_dossier(alert, upn, evidence, data_gaps)
+
+    def _build_dossier(
+        self,
+        alert: dict[str, Any],
+        upn: str,
+        evidence: dict[str, Any],
+        data_gaps: list[str],
+    ) -> InvestigatorOutput:
         if evidence["user_profile"] is None:
             data_gaps.append(f"No user profile returned for {upn}.")
         if not evidence["sign_in_history"]:
             data_gaps.append(f"No sign-in history returned for {upn}.")
-
         indicators, mitre_evidence = derive_indicators(
             evidence, upn, _alert_time(alert)
         )
@@ -277,6 +324,21 @@ class Investigator:
         if self.trace is not None:
             self.trace.record_tool_call(name, arguments, result)
         return result
+
+    def _prefetch(
+        self, name: str, arguments: dict[str, Any], data_gaps: list[str]
+    ) -> Any:
+        """Run a pre-fetch with the same retry-once policy, off the cap."""
+        try:
+            return self._run_tool(name, arguments)
+        except SimulatedGraphError:
+            try:
+                return self._run_tool(name, arguments)
+            except SimulatedGraphError as second:
+                data_gaps.append(
+                    f"{name} failed with {second.status_code} after one retry."
+                )
+                return _FAILED
 
     def _retry_or_record(
         self,

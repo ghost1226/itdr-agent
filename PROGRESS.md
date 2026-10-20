@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, starting with the unknown-user short-circuit (item 5).
+- **What's next:** the **ITDR Dream Run 1** fixes, starting with thin-evidence confidence kept separate (item 7).
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -197,6 +197,7 @@
 - ✅ Progress checker (2026-10-20, Dream Run 1 item 3): `scripts/check_progress.py` exits 1 and prints the 7-char hash of any commit newer than the `d33eb1e` baseline that is missing from PROGRESS.md; HEAD is skipped (a commit cannot contain its own hash) and older commits are not checked (their hashes live in the frozen pre-move repo). 5 new tests (`tests/test_check_progress.py`) run against a temp git repo. Red `1145502`, green `f791472`. AGENTS.md rule 10 now says to run it before calling a task done.
 - ✅ Per-run trace logging (2026-10-20, Dream Run 1 item 4): every run writes `runs/<run_id>.json` beside its audit log — the ordered tool calls (name, arguments, rows), every LLM request (stage, tokens in/out, seconds), the full dossier, the full report (narrative, steps, rollbacks), and the analyst's answers. The `run` audit line now carries `model`, `mode` (`live`/`mock`/`offline`, plus `+dirty` when tracked files differ from HEAD) and `trace_path`; mock/offline runs write `audit-mock.jsonl` instead of `audit.jsonl`; the eval passes its token meter into the orchestrator, so eval audit lines are no longer `tokens: null`. Traces are gitignored like the audit log. Red `315158b`, green `782ef36`; 11 new tests (`tests/test_trace.py`).
 - ✅ Trace follow-up (2026-10-20, before push): the `run` line now carries a `commit` field (git short hash, `+dirty` when tracked files differ from HEAD) and `mode` stays plain; the trace is written on failed runs too (try/finally) with an `error` field (exception class); a tool that raises records `"error": <exception class>` instead of rows 0; `mode` defaults to `unknown`, not `live`. Red `24037a4`, green `bebb40d`; 4 net new tests (15 in `tests/test_trace.py`).
+- ✅ Code pre-fetch (2026-10-20, Dream Run 1 items 5-6): `Investigator.investigate()` now calls `get_user_profile`, `get_sign_in_history` and `get_directory_audits` (hours = `BASELINE_HOURS` = 168) in code before the ReAct loop, merges them into the dossier, and feeds them to the model as wrapped untrusted tool results; the trace records them like any tool call, and they do not count toward `MAX_TOOL_CALLS` (the model still gets its own 8 and may re-call a tool with a different window). A missing profile or zero sign-ins returns the dossier with zero model calls (ALERT_010); a `SimulatedGraphError` still retries once per pre-fetch. Red `9b66b7a`.
 
 ## Microsoft Graph Schema Sources
 
@@ -245,14 +246,14 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**The ITDR Dream Run 1 fixes, starting with the unknown-user short-circuit (item 5)** — the next work after the evaluation. The list, in order:
+**The ITDR Dream Run 1 fixes, starting with thin-evidence confidence kept separate (item 7)** — the next work after the evaluation. The list, in order:
 
 1. DONE: skill escape codes (`b0eabad`)
 2. DONE: PROGRESS sync (`f2c5c0a`)
 3. DONE: `scripts/check_progress.py` (`f791472`)
 4. DONE: per-run trace logging (`315158b`)
-5. Unknown-user short-circuit
-6. Mandatory pre-fetch
+5. DONE: unknown-user short-circuit (`9b66b7a`)
+6. DONE: mandatory pre-fetch (`9b66b7a`)
 7. Thin-evidence confidence kept separate
 8. Targeted analyst question
 9. No containment on FP or INSUFFICIENT_DATA
@@ -511,3 +512,5 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `f8b8150` — trace-logging: update PROGRESS.md (red/green hashes, Dream Run items 3-4 done)
 - `24037a4` — trace-logging: red — run-line commit field, plain mode (default unknown), trace on failure, tool error class
 - `bebb40d` — trace-logging: green — run-line commit field, plain mode (default unknown), trace on failure, tool error class
+- `98c4a4a` — trace-logging: update PROGRESS.md (follow-up red/green hashes)
+- `9b66b7a` — prefetch: red — code pre-fetch before the ReAct loop; ALERT_010 makes 0 model calls
