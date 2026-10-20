@@ -162,6 +162,8 @@ class Investigator:
         # Set per run by the orchestrator (total timeout); None = no deadline.
         self.deadline: float | None = None
         self.clock: Callable[[], float] = time.monotonic
+        # Set per run by the orchestrator; None = no trace file.
+        self.trace: Any | None = None
 
     # --- public ------------------------------------------------------------
 
@@ -186,7 +188,7 @@ class Investigator:
                 raise InvestigationTimeoutError(
                     f"total timeout reached after {self.tool_calls_made} tool calls"
                 )
-            action = self.llm.next_action(messages)
+            action = self._next_action(messages)
             if not isinstance(action, dict) or action.get("action") != "tool":
                 break
             name = action.get("tool", "")
@@ -201,7 +203,7 @@ class Investigator:
 
             self.tool_calls_made += 1
             try:
-                result = self._execute_tool(name, arguments)
+                result = self._run_tool(name, arguments)
             except SimulatedGraphError as exc:
                 result = self._retry_or_record(name, arguments, exc, data_gaps)
                 if result is _ABORT:
@@ -260,6 +262,22 @@ class Investigator:
 
     # --- internals ---------------------------------------------------------
 
+    def _next_action(self, messages: list[dict]) -> Any:
+        if self.trace is None:
+            return self.llm.next_action(messages)
+        return self.trace.call_llm("investigation", self.llm.next_action, messages)
+
+    def _run_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            result = self._execute_tool(name, arguments)
+        except Exception:
+            if self.trace is not None:
+                self.trace.record_tool_call(name, arguments, None)
+            raise
+        if self.trace is not None:
+            self.trace.record_tool_call(name, arguments, result)
+        return result
+
     def _retry_or_record(
         self,
         name: str,
@@ -276,7 +294,7 @@ class Investigator:
             return _ABORT
         self.tool_calls_made += 1
         try:
-            return self._execute_tool(name, arguments)
+            return self._run_tool(name, arguments)
         except SimulatedGraphError as second:
             data_gaps.append(
                 f"{name} failed with {second.status_code} after one retry."

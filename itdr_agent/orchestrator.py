@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ from .adjudicator import (
 )
 from .human import Reviewer
 from .investigator import InvestigationTimeoutError
+from .trace import RUNS_DIRNAME, RunTrace
 from .usage import TokenMeter
 from .schemas import (
     CONFIDENCE_THRESHOLD,
@@ -57,6 +59,20 @@ from .schemas import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AUDIT_LOG = PROJECT_ROOT / "logs" / "audit.jsonl"
+
+
+def _tree_is_dirty(repo: Path = PROJECT_ROOT) -> bool:
+    """True if tracked files differ from HEAD (untracked files ignored)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:  # git missing, not a repo, or timeout: treat as clean
+        return False
+    return bool(result.stdout.strip())
 
 ALLOWED_EMAIL_DOMAINS = {"contoso.com"}
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+)")
@@ -102,6 +118,7 @@ class OrchestrationResult:
     audit_path: Path
     run_id: str
     tokens: dict[str, int] | None = None
+    trace_path: Path | None = None
 
 
 class Orchestrator:
@@ -116,11 +133,21 @@ class Orchestrator:
         timeout_seconds: int | None = None,
         clock: Callable[[], float] = time.monotonic,
         token_meter: TokenMeter | None = None,
+        model: str | None = None,
+        mode: str = "live",
+        dirty: bool | None = None,
     ) -> None:
         self.investigator = investigator
         self.adjudicator = adjudicator
         self.reviewer = reviewer
+        self.model = model
+        self.mode = mode
+        self._dirty = dirty
+        self._trace: RunTrace | None = None
         self.audit_log = Path(audit_log) if audit_log else DEFAULT_AUDIT_LOG
+        if mode in ("mock", "offline"):
+            # A run that never touches a live model stays out of the live log.
+            self.audit_log = self.audit_log.with_name("audit-mock.jsonl")
         self.timeout_seconds = (
             config.TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
         )
@@ -142,6 +169,11 @@ class Orchestrator:
         self.audit_log.parent.mkdir(parents=True, exist_ok=True)
         alert_id = alert.get("id", "")
         run_id = run_id or f"{alert_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        trace_path = self.audit_log.parent / RUNS_DIRNAME / f"{run_id}.json"
+        self._trace = RunTrace(alert_id, run_id, meter=self.token_meter)
+        for target in (self.investigator, self.adjudicator):
+            if hasattr(target, "trace"):
+                target.trace = self._trace
 
         assert_synthetic(alert)  # governance: no real domains
 
@@ -174,6 +206,7 @@ class Orchestrator:
         report = self._review_containment(alert_id, dossier, report, run_id)
         report = apply_confidence_guardrail(report)
 
+        self._trace.write(trace_path, dossier=dossier, report=report)
         self._append(
             run_id,
             {
@@ -189,6 +222,9 @@ class Orchestrator:
                 "llm_called": llm_called,
                 "questions_asked": self._questions_asked,
                 "re_adjudications": self._re_adjudications,
+                "model": self.model,
+                "mode": self._mode(),
+                "trace_path": str(trace_path),
                 **self._token_fields(),
             },
         )
@@ -203,6 +239,7 @@ class Orchestrator:
             audit_path=self.audit_log,
             run_id=run_id,
             tokens=self._tokens(),
+            trace_path=trace_path,
         )
 
     # --- internals ---------------------------------------------------------
@@ -228,10 +265,10 @@ class Orchestrator:
         )
 
     def _adjudicate(
-        self, dossier: InvestigatorOutput, run_id: str
+        self, dossier: InvestigatorOutput, run_id: str, stage: str = "adjudication"
     ) -> AdjudicatorOutput:
         try:
-            report = self.adjudicator.adjudicate(dossier)
+            report = self.adjudicator.adjudicate(dossier, stage=stage)
         except UnsupportedMitreClaimError as exc:
             self._append(
                 run_id,
@@ -343,6 +380,8 @@ class Orchestrator:
         result = self.reviewer.ask(question, options, True)
         self._deadline += self.clock() - asked_at  # analyst time doesn't count
         self._questions_asked += 1
+        if self._trace is not None:
+            self._trace.record_analyst_answer(result)
         self._append(
             run_id,
             {
@@ -372,7 +411,7 @@ class Orchestrator:
 
         self._check_deadline(run_id, alert_id, "re_adjudication")
         self._re_adjudications += 1
-        new_report = self._adjudicate(dossier, run_id)
+        new_report = self._adjudicate(dossier, run_id, stage="re_adjudication")
         self._append(
             run_id,
             {
@@ -445,6 +484,11 @@ class Orchestrator:
         report.containment_steps = kept
         report.unsafe_rollbacks = find_unsafe_rollbacks(report)  # final indexes
         return report
+
+    def _mode(self) -> str:
+        if self._dirty is None:
+            self._dirty = _tree_is_dirty()
+        return f"{self.mode}+dirty" if self._dirty else self.mode
 
     def _tokens(self) -> dict[str, int] | None:
         return None if self.token_meter is None else self.token_meter.snapshot()

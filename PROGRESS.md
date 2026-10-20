@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, starting with `scripts/check_progress.py`.
+- **What's next:** the **ITDR Dream Run 1** fixes, starting with the unknown-user short-circuit (item 5).
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -194,7 +194,8 @@
   - Review: frozen eval files 0-line diff, `ScriptedReviewer` byte-identical; 0 IP / answer-key leaks across all 10 alerts x 4 verdicts; offline Chrome click-through (queue → search → open → verdict above step → approve → incident note → Closed).
   - Open: Back to queue while a run waits on the analyst drops that run (thread stays blocked, status stuck at "Waiting on you").
 - ✅ Skill doc sync (2026-10-20, Joe: "one fix only"): `.agents/skills/untrusted-data-wrapping/SKILL.md` rule 1 now reads "replace `<` with `\u003c` and `>` with `\u003e`" — the escape codes had been lost (it read "replace `<` with `<` and `>` with `>`"). Matches `itdr_agent/tools.py` (`wrap_tool_output`, `wrap_analyst_input`). Doc only; no code or tests changed. Commit `b0eabad`.
-- ✅ Progress checker (2026-10-20, Dream Run 1 item 3): `scripts/check_progress.py` exits 1 and prints the 7-char hash of any commit newer than the `d33eb1e` baseline that is missing from PROGRESS.md; HEAD is skipped (a commit cannot contain its own hash) and older commits are not checked (their hashes live in the frozen pre-move repo). 5 new tests (`tests/test_check_progress.py`) run against a temp git repo. Red `1145502`. AGENTS.md rule 10 now says to run it before calling a task done.
+- ✅ Progress checker (2026-10-20, Dream Run 1 item 3): `scripts/check_progress.py` exits 1 and prints the 7-char hash of any commit newer than the `d33eb1e` baseline that is missing from PROGRESS.md; HEAD is skipped (a commit cannot contain its own hash) and older commits are not checked (their hashes live in the frozen pre-move repo). 5 new tests (`tests/test_check_progress.py`) run against a temp git repo. Red `1145502`, green `f791472`. AGENTS.md rule 10 now says to run it before calling a task done.
+- ✅ Per-run trace logging (2026-10-20, Dream Run 1 item 4): every run writes `runs/<run_id>.json` beside its audit log — the ordered tool calls (name, arguments, rows), every LLM request (stage, tokens in/out, seconds), the full dossier, the full report (narrative, steps, rollbacks), and the analyst's answers. The `run` audit line now carries `model`, `mode` (`live`/`mock`/`offline`, plus `+dirty` when tracked files differ from HEAD) and `trace_path`; mock/offline runs write `audit-mock.jsonl` instead of `audit.jsonl`; the eval passes its token meter into the orchestrator, so eval audit lines are no longer `tokens: null`. Traces are gitignored like the audit log. Red `315158b`; 11 new tests (`tests/test_trace.py`).
 
 ## Microsoft Graph Schema Sources
 
@@ -243,12 +244,12 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**The ITDR Dream Run 1 fixes, starting with `scripts/check_progress.py`** — the next work after the evaluation. The list, in order:
+**The ITDR Dream Run 1 fixes, starting with the unknown-user short-circuit (item 5)** — the next work after the evaluation. The list, in order:
 
 1. DONE: skill escape codes (`b0eabad`)
 2. DONE: PROGRESS sync (`f2c5c0a`)
-3. `scripts/check_progress.py`
-4. Per-run trace logging
+3. DONE: `scripts/check_progress.py` (`f791472`)
+4. DONE: per-run trace logging (`315158b`)
 5. Unknown-user short-circuit
 6. Mandatory pre-fetch
 7. Thin-evidence confidence kept separate
@@ -503,3 +504,5 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `19a9fc1` — PROGRESS: reopen problem 14 (Investigator skips needed tools); correct pre-move hash note
 - `d33eb1e` — PROGRESS: list the ITDR Dream Run 1 fixes in What's Next
 - `1145502` — check-progress: red — tests for scripts/check_progress.py (temp git repo)
+- `f791472` — check-progress: green — scripts/check_progress.py + AGENTS rule 10 + PROGRESS
+- `315158b` — trace-logging: red — per-run trace files + run-line model/mode/trace_path; mock/offline to audit-mock

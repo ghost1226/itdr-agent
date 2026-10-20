@@ -344,10 +344,17 @@ class Adjudicator:
     ) -> None:
         self.llm = llm
         self.baseline = baseline
+        # Set per run by the orchestrator; None = no trace file.
+        self.trace: Any | None = None
 
-    def adjudicate(self, dossier: InvestigatorOutput) -> AdjudicatorOutput:
+    def adjudicate(
+        self, dossier: InvestigatorOutput, stage: str = "adjudication"
+    ) -> AdjudicatorOutput:
         messages = build_adjudicator_prompt(dossier)
-        raw = self.llm.complete(messages)
+        if self.trace is None:
+            raw = self.llm.complete(messages)
+        else:
+            raw = self.trace.call_llm(stage, self.llm.complete, messages)
         report = parse_adjudicator_output(raw)
         report = apply_confidence_guardrail(report)
         baseline = (

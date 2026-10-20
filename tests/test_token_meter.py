@@ -238,7 +238,8 @@ def test_cli_prints_the_token_line(monkeypatch, capsys):
         return SimpleNamespace(meter=meter)
 
     class FakeOrchestrator:
-        def __init__(self, investigator, adjudicator, reviewer, token_meter=None):
+        def __init__(self, investigator, adjudicator, reviewer, token_meter=None,
+                     **kwargs):
             self.meter = token_meter
 
         def run(self, alert):
@@ -262,5 +263,6 @@ def test_gui_report_shows_the_token_line(tmp_path, monkeypatch):
     monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     at = _start(_app(), "ALERT_010")  # unknown user: short-circuits, no review
     assert "Tokens: no model calls" in _page_text(at)
-    (line,) = _run_entries(tmp_path / "audit.jsonl", "run")
+    # The GUI offline mode is a mock run: the orchestrator writes audit-mock.
+    (line,) = _run_entries(tmp_path / "audit-mock.jsonl", "run")
     assert line["llm_requests"] == 0

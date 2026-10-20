@@ -102,7 +102,12 @@ def main(argv: list[str] | None = None) -> int:
         _OpenRouterAdjudicatorLLM(config.OPENROUTER_API_KEY, model, timeout, meter)
     )
     result = Orchestrator(
-        investigator, adjudicator, CliReviewer(), token_meter=meter
+        investigator,
+        adjudicator,
+        CliReviewer(),
+        token_meter=meter,
+        model=model,
+        mode="live",
     ).run(alerts[args.alert_id])
     print(result.report.model_dump_json(indent=2))
     print(format_tokens(result.tokens))

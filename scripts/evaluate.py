@@ -54,6 +54,7 @@ from itdr_agent.adjudicator import (  # noqa: E402
 from itdr_agent.human import ScriptedReviewer  # noqa: E402
 from itdr_agent.investigator import MAX_TOOL_CALLS, Investigator  # noqa: E402
 from itdr_agent.orchestrator import Orchestrator  # noqa: E402
+from itdr_agent.usage import TokenMeter  # noqa: E402
 
 # Gemma 4 31B (free) was rate-limited upstream on 2026-10-12; Joe switched the
 # evaluation to Nemotron 3 Super (free), verified on OpenRouter the same day.
@@ -183,7 +184,13 @@ def make_openrouter_client(api_key: str, timeout: int):
     )
 
 
-def _chat(client: Any, model: str, budget: RequestBudget, messages: list) -> str:
+def _chat(
+    client: Any,
+    model: str,
+    budget: RequestBudget,
+    messages: list,
+    meter: TokenMeter | None = None,
+) -> str:
     budget.acquire()
     response = client.chat.completions.create(
         model=model,
@@ -192,24 +199,43 @@ def _chat(client: Any, model: str, budget: RequestBudget, messages: list) -> str
         response_format={"type": "json_object"},
         max_tokens=config.MAX_OUTPUT_TOKENS,
     )
-    budget.add_usage(getattr(response, "usage", None))
+    usage = getattr(response, "usage", None)
+    budget.add_usage(usage)
+    if meter is not None:
+        meter.add(usage)
     return response.choices[0].message.content or ""
 
 
 class _LiveInvestigatorLLM:
-    def __init__(self, client: Any, model: str, budget: RequestBudget) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        budget: RequestBudget,
+        meter: TokenMeter | None = None,
+    ) -> None:
         self.client, self.model, self.budget = client, model, budget
+        self.meter = meter
 
     def next_action(self, messages: list[dict]) -> dict[str, Any]:
-        return json.loads(_chat(self.client, self.model, self.budget, messages) or "{}")
+        return json.loads(
+            _chat(self.client, self.model, self.budget, messages, self.meter) or "{}"
+        )
 
 
 class _LiveAdjudicatorLLM:
-    def __init__(self, client: Any, model: str, budget: RequestBudget) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        budget: RequestBudget,
+        meter: TokenMeter | None = None,
+    ) -> None:
         self.client, self.model, self.budget = client, model, budget
+        self.meter = meter
 
     def complete(self, messages: list[dict]) -> str:
-        return _chat(self.client, self.model, self.budget, messages)
+        return _chat(self.client, self.model, self.budget, messages, self.meter)
 
 
 def make_live_runner(
@@ -222,14 +248,20 @@ def make_live_runner(
     """``timeout`` caps each request (90 s); ``total_timeout`` caps a whole run."""
     client = make_openrouter_client(api_key, timeout)
     total = config.TIMEOUT_SECONDS if total_timeout is None else total_timeout
+    # The eval counts requests itself in ``RequestBudget``; this meter also
+    # feeds the orchestrator's audit line and per-run trace.
+    meter = TokenMeter()
 
     def run(alert, run_index, run_id, budget):
         orchestrator = Orchestrator(
-            Investigator(_LiveInvestigatorLLM(client, model, budget)),
-            Adjudicator(_LiveAdjudicatorLLM(client, model, budget)),
+            Investigator(_LiveInvestigatorLLM(client, model, budget, meter)),
+            Adjudicator(_LiveAdjudicatorLLM(client, model, budget, meter)),
             make_eval_reviewer(),
             audit_log=audit_log,
             timeout_seconds=total,
+            token_meter=meter,
+            model=model,
+            mode="live",
         )
         return orchestrator.run(alert, run_id=run_id)
 
@@ -278,6 +310,8 @@ def make_offline_runner(ground_truth: dict[str, dict], audit_log: Path):
             Adjudicator(_OfflineReportLLM(reply, budget)),
             make_eval_reviewer(),
             audit_log=audit_log,
+            mode="offline",
+            model="offline-dry-run",
         )
         return orchestrator.run(alert, run_id=run_id)
 

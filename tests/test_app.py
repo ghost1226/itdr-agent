@@ -27,11 +27,12 @@ FAKE_KEY = "sk-or-v1-THIS-IS-A-TEST-SECRET"
 
 @pytest.fixture
 def audit(tmp_path, monkeypatch):
-    path = tmp_path / "audit.jsonl"
-    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(path))
+    # The GUI's offline mode is a mock run, so the orchestrator writes
+    # ``audit-mock.jsonl`` beside the configured path.
+    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     # Never let a test see a real key, and prove the page never prints one.
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", FAKE_KEY)
-    return path
+    return tmp_path / "audit-mock.jsonl"
 
 
 def _app() -> AppTest:

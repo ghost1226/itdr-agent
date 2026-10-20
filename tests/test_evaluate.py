@@ -597,6 +597,9 @@ def test_live_runner_drives_real_orchestrator_and_counts_every_request(
     assert all(k["model"] == MODEL and k["temperature"] == 0 for k in completions.kwargs)
     audit = [json.loads(l) for l in (tmp_path / "audit.jsonl").read_text().splitlines()]
     assert audit and all(e["run_id"] == record["run_id"] for e in audit)
+    run_line = next(e for e in audit if e["event"] == "run")
+    # The eval passes its token meter into the orchestrator (not null).
+    assert run_line["tokens_in"] == 4000 and run_line["tokens_out"] == 200
 
 
 # --- review fixes: config errors stop, infrastructure errors skip, full plan --

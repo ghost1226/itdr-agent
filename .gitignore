@@ -9,3 +9,6 @@ logs/
 eval/dry_run/
 eval/**/state.json
 eval/**/audit.jsonl
+eval/**/audit-mock.jsonl
+# Per-run traces (synthetic data, local only)
+**/runs/

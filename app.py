@@ -83,7 +83,8 @@ def _offline_builder(alert_id: str, audit: Path):
         adjudicator = Adjudicator(samples._MockCompleteLLM(reply))
         # Mock LLMs never report usage, so the page shows "no model calls".
         return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit,
-                            token_meter=TokenMeter())
+                            token_meter=TokenMeter(), mode="offline",
+                            model="offline-demo")
 
     return build
 
@@ -107,7 +108,7 @@ def _live_builder(model: str, audit: Path):
             _OpenRouterAdjudicatorLLM(key, model, timeout, meter)
         )
         return Orchestrator(investigator, adjudicator, reviewer, audit_log=audit,
-                            token_meter=meter)
+                            token_meter=meter, mode="live", model=model)
 
     return build
 
@@ -331,8 +332,8 @@ def _report(run: GuiRun) -> None:
     with st.expander("Dossier (the evidence the verdict was based on)"):
         st.json(result.dossier.model_dump(mode="json"))
     st.subheader("Audit trail")
-    st.caption(f"From {_audit_path()}, this run only ({result.run_id}).")
-    path = _audit_path()
+    st.caption(f"From {result.audit_path}, this run only ({result.run_id}).")
+    path = result.audit_path
     lines = [
         line for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and json.loads(line).get("run_id") == result.run_id

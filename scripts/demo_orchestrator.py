@@ -23,7 +23,7 @@ from itdr_agent.human import (  # noqa: E402
 from itdr_agent.orchestrator import Orchestrator  # noqa: E402
 import samples  # noqa: E402  (scripts/samples.py)
 
-AUDIT = PROJECT_ROOT / "logs" / "audit.jsonl"
+AUDIT = PROJECT_ROOT / "logs" / "audit-mock.jsonl"
 
 
 class CompleteLLM:
@@ -70,7 +70,12 @@ def _run(alert_id, responses, reviewer):
     investigator, alert = samples.build_investigator(alert_id)
     llm = CompleteLLM(responses)
     orch = Orchestrator(
-        investigator, Adjudicator(llm), reviewer, audit_log=AUDIT
+        investigator,
+        Adjudicator(llm),
+        reviewer,
+        audit_log=AUDIT,
+        mode="offline",
+        model="offline-demo",
     )
     return orch.run(alert), llm
 
@@ -184,19 +189,19 @@ def main() -> int:
     _show("5. ALERT_010 unknown user short-circuit", result, llm)
 
     # audit lines -----------------------------------------------------------------
-    print("\n===== audit.jsonl: containment_decision =====")
+    print("\n===== audit-mock.jsonl: containment_decision =====")
     for entry in _lines("containment_decision"):
         print(json.dumps(entry))
-    print("\n===== audit.jsonl: ask_user =====")
+    print("\n===== audit-mock.jsonl: ask_user =====")
     for entry in _lines("ask_user"):
         print(json.dumps(entry))
-    print("\n===== audit.jsonl: re_adjudication =====")
+    print("\n===== audit-mock.jsonl: re_adjudication =====")
     for entry in _lines("re_adjudication"):
         print(json.dumps(entry))
-    print("\n===== audit.jsonl: mitre_rejection =====")
+    print("\n===== audit-mock.jsonl: mitre_rejection =====")
     for entry in _lines("mitre_rejection"):
         print(json.dumps(entry))
-    print("\n===== audit.jsonl: run (ALERT_010) =====")
+    print("\n===== audit-mock.jsonl: run (ALERT_010) =====")
     for entry in _lines("run"):
         if entry["alert_id"] == "ALERT_010":
             print(json.dumps(entry))
