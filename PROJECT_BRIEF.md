@@ -71,6 +71,7 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 - **Everything is synthetic.** The corpus is 10 alerts (5 attacks, 3 benign look-alikes, 1 thin-data, 1 unknown user), 30 users, 133 sign-ins, and 53 directory audits, generated from a fixed seed [F1]. No real logs, users, or tenant data were used at any point [A1].
 - **Microsoft Graph is simulated.** The agent calls a local stand-in for Graph [C1]. Field names were checked against Microsoft Learn and are locked by an allowlist test [T1], and one field we rely on (`networkLocationDetails`) exists only in the Graph beta API [P1]. A real tenant adds things this project never exercised: paging, throttling, missing or renamed fields, and far more noise.
 - **The same team wrote the data and the detection logic.** The MITRE mapping in code was built against the same five attack patterns the generator plants [P2]. That risks measuring how well the agent matches its own data. What we did: the answer key (`ground_truth.jsonl`) never reaches the model [T2], each attack has a benign look-alike, and every technique must point to the exact sign-in or audit record that proves it [T3]. It is still not an independent test set.
+- **The test IP ranges leaked into the model's reasoning.** The benign look-alikes sign in from documentation ranges (203.0.113.x, TEST-NET-3), while the attacks use real-world ranges. In all 3 ALERT_006 runs called FALSE_POSITIVE, the narrative gave the TEST-NET range ("synthetic or test data") as a reason the sign-in was benign [E1, E3]. On real data that shortcut would wave attacks through. Since `044ae3c`, the prompt says an IP's address range is never evidence on its own, and a code check flags any report that leans on one (it flags exactly those 3 saved runs and no others) [P12]. It has not been re-evaluated live yet.
 
 ### 7.2 Free-model variability and reproducibility
 
@@ -135,6 +136,7 @@ The numbers below come from the full evaluation: 30 of 30 runs, 0 failed, run fr
 - **[P9]** PROGRESS.md, max-tokens fix (`8642520` / `7fefa50`, `config.MAX_OUTPUT_TOKENS = 8192`).
 - **[P10]** PROGRESS.md, Open Problem 10 ("Confidently wrong on thin data").
 - **[P11]** PROGRESS.md, "Guard counts its own baseline" (problem #34; `dd730bd` / `8e5db38`); `itdr_agent/adjudicator.py` (`fetch_baseline`, `BASELINE_HOURS = 168`, `apply_thin_evidence_guard`); `tests/test_thin_evidence.py`.
+- **[P12]** PROGRESS.md, "IP range is never evidence" (Dream Run 1; `02244c6` / `044ae3c`); `itdr_agent/adjudicator.py` (`apply_ip_range_guard`).
 - **[E3]** `eval/after-fix/results.md` and `eval/after-fix/raw.jsonl` (10 runs, 1 per alert, 2026-10-16 to 10-18); the pre-fix rows are in `raw-old-prompt.jsonl` and `raw-pre-fix-34.jsonl`.
 - **[X1]** OpenRouter, API rate limits: https://openrouter.ai/docs/api/reference/limits (checked 2026-10-13).
 

@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, next is TEST-NET range is never evidence (item 11).
+- **What's next:** the **ITDR Dream Run 1** fixes, all 11 items are built; next is the live re-runs (ALERT_006 x3, ALERT_004 x3, ALERT_009, ALERT_010) on Joe's go, then a second dream run.
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -201,6 +201,7 @@
 - ✅ Analyst question by trigger (2026-10-20, Dream Run 1 items 7-8): `AdjudicatorOutput` gains code-only `model_verdict`/`model_confidence`, set by `apply_thin_evidence_guard` when it flips a FALSE_POSITIVE; the analyst question is built by code from a trigger — `thin_evidence` ("<upn> has only N sign-ins in the last 7 days. Is a sign-in from <city>, <country> on <date> normal for this user?"), `new_country` ("Is <upn> traveling in <country>, or expected to sign in from there?"), else the verdict and confidence + "What context would help?" — never by the LLM; the `ask_user` audit line records the `trigger`; the verdict box and CLI show "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA because only 2 sign-ins in the last 7 days." instead of a bare "INSUFFICIENT_DATA 0.92". Red `3d64faa`, green `8866e41`; 6 new tests (`tests/test_analyst_question.py`).
 - ✅ No containment on benign/unknown verdicts (2026-10-20, Dream Run 1 item 9; built by Jessica): `apply_no_containment_guard` runs after the thin-evidence guard and moves every containment step on a FALSE_POSITIVE or INSUFFICIENT_DATA verdict into recommended actions ("Optional, analyst's call: <step> (undo: <rollback>)"), sets code-only `moved_containment_steps`, adds an audit note, and the orchestrator logs a `containment_moved` audit line. Nothing reaches approve/edit/reject on those verdicts. Red `c90e377` (5 failed, 1 passed) → green `52713c3`; full suite **428 passed**.
 - ✅ Rollback-warning fatigue (2026-10-20, Dream Run 1 item 10; built by Jessica): the unsafe-rollback guard flagged all 5 after-fix COMPROMISED runs. Likely cause, reproduced offline: the prompt says "never restore an old password" and the model echoes it ("do not restore the previous password"), which matched. (1) `is_unsafe_rollback` skips a match negated within 3 words before its verb ("Without verifying, restore..." stays unsafe). (2) `apply_standard_rollbacks`: a password-reset, MFA re-register or session-revoke step whose rollback is still unsafe gets code's safe rollback (`STANDARD_ROLLBACKS`); the model's text stays in the audit note, `standard_rollbacks` records the indexes, and the orchestrator logs a `standard_rollback` line. Unknown steps keep the analyst warning; warning-path tests now use "Lock the account". Red `950ef7d` → green `0d75c9c`; full suite **445 passed**.
+- ✅ IP range is never evidence (2026-10-20, Dream Run 1 item 11; built by Jessica): in all 3 ALERT_006 FALSE_POSITIVE runs the model cited 203.0.113.x as a TEST-NET documentation range ("synthetic or test data"). New prompt line: an IP's address range is never evidence on its own; judge the behavior. `apply_ip_range_guard` flags (never rejects) TEST-NET / RFC 5737 / documentation-reserved-example range / synthetic-test data wording in the narrative, notes and actions; code-only `ip_range_reasoning`, an audit note, and an `ip_range_reasoning` audit line. Checked on every saved narrative: it flags exactly those 3 runs. PROJECT_BRIEF section 7.1 bullet + [P12]. Red `02244c6` → green `044ae3c`; full suite **456 passed**. Needs a live re-run of ALERT_006 to show the prompt change holds.
 
 ## Microsoft Graph Schema Sources
 
@@ -261,7 +262,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 8. DONE: targeted analyst question (`3d64faa`)
 9. DONE: no containment on FP or INSUFFICIENT_DATA (`c90e377`, `52713c3`)
 10. DONE: code-supplied rollbacks + negation fix (`950ef7d`, `0d75c9c`)
-11. TEST-NET range is never evidence
+11. DONE: TEST-NET range is never evidence (`02244c6`, `044ae3c`)
 
 **Final evaluation (locked 2026-10-16):** 30/30 runs in `eval/final/` (`0924fc3`) — exact 80.0%, majority-of-3 80%, detection 100%, 0 of 9 benign flagged, MITRE precision 100% / recall 83.3%, agreement 93.3%. Misses: ALERT_004 (app consent) and ALERT_009 (thin data). The separate after-fix run (`eval/after-fix/`, 1 run per alert) is 10/10 with 0 false positives.
 
@@ -527,3 +528,6 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `f8fd3d1` — no-containment: update PROGRESS.md (Dream Run item 9 done)
 - `950ef7d` — rollback-fatigue: red — negated restores are safe; known one-way steps get a standard rollback
 - `0d75c9c` — rollback-fatigue: green — negation fix, standard rollbacks, standard_rollback audit line
+- `a679770` — rollback-fatigue: update PROGRESS.md (Dream Run item 10 done)
+- `02244c6` — ip-range: red — an IP's address range is never evidence
+- `044ae3c` — ip-range: green — prompt line, IP-range guard, ip_range_reasoning audit line
