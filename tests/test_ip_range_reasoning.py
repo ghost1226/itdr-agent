@@ -53,15 +53,14 @@ def test_behavior_reasoning_is_not_flagged(narrative):
 
 
 def test_adjudicator_flags_but_keeps_the_verdict():
+    # SUSPICIOUS, so the thin-evidence guard (1 sign-in) leaves the verdict alone.
     raw = _report(
-        verdict="FALSE_POSITIVE",
-        confidence=0.9,
-        narrative="Benign: 203.0.113.51 is a TEST-NET documentation address.",
-        containment_steps=[],
-        mitre_techniques_observed=[],
+        verdict="SUSPICIOUS",
+        confidence=0.8,
+        narrative="Likely test data: 203.0.113.51 is a TEST-NET documentation address.",
     )
     report = Adjudicator(CompleteLLM([raw]), baseline=None).adjudicate(_dossier())
-    assert report.verdict.value == "FALSE_POSITIVE"
+    assert report.verdict.value == "SUSPICIOUS"
     assert report.ip_range_reasoning
     assert "IP-range guard" in report.audit_notes
 

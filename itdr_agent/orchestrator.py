@@ -389,6 +389,16 @@ class Orchestrator:
                     "steps": report.moved_containment_steps,
                 },
             )
+        if report.ip_range_reasoning:
+            self._append(
+                run_id,
+                {
+                    "event": "ip_range_reasoning",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "phrases": report.ip_range_reasoning,
+                },
+            )
         if report.standard_rollbacks:
             self._append(
                 run_id,

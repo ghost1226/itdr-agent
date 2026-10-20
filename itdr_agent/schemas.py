@@ -103,6 +103,9 @@ class AdjudicatorOutput(BaseModel):
     # Set by code (adjudicator.apply_standard_rollbacks), never by the model:
     # indexes of steps whose unsafe rollback code replaced with a safe one.
     standard_rollbacks: list[int] = Field(default_factory=list)
+    # Set by code (adjudicator.apply_ip_range_guard), never by the model:
+    # phrases where the report treats an IP's address range as evidence.
+    ip_range_reasoning: list[str] = Field(default_factory=list)
 
 
 CONFIDENCE_THRESHOLD = 0.7

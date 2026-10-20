@@ -79,6 +79,10 @@ SYSTEM_PROMPT = (
     "restore an old password or a previous MFA setup. To undo a password reset, "
     "issue a new temporary password; to undo an MFA reset, have the user "
     "re-register after verifying their identity.\n"
+    "An IP's address range is never evidence on its own: never call activity "
+    "benign or malicious because an address looks like a test, documentation, "
+    "reserved, or example range. Judge the behavior: location, timing, device, "
+    "and what the account did.\n"
 )
 # Thin evidence is handled in code (apply_thin_evidence_guard), not here:
 # a prompt rule made the model answer INSUFFICIENT_DATA on benign alerts
@@ -201,6 +205,23 @@ NO_CONTAINMENT_NOTE = (
     "actions because the verdict is {verdict}."
 )
 
+# Dream Run 1 item 1: in all 3 ALERT_006 FALSE_POSITIVE runs the model cited
+# 203.0.113.x as a TEST-NET documentation range ("synthetic or test data").
+# On real data that shortcut would wave attacks through. Flag, never reject.
+_IP_RANGE_PATTERNS = [
+    re.compile(r"\bTEST-?NET(?:-\d)?\b", re.IGNORECASE),
+    re.compile(r"\bRFC\s?5737\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:documentation|reserved|example)\s+(?:IP\s+)?(?:range|address|block|prefix)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:synthetic|test)\s+data\b", re.IGNORECASE),
+]
+IP_RANGE_NOTE = (
+    "IP-range guard: the report leans on an IP's address range ({phrases}). "
+    "A range is never evidence on its own; judge the behavior instead."
+)
+
 ACTION_CLAIM_NOTE = (
     "Action-claim guard: the report says actions were already taken ({claims}). "
     "The agent executes nothing; every containment step is a recommendation "
@@ -280,6 +301,28 @@ def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
     report.action_claims = claims
     if claims:
         note = ACTION_CLAIM_NOTE.format(claims="; ".join(f'"{c}"' for c in claims))
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+    return report
+
+
+def find_ip_range_reasoning(report: AdjudicatorOutput) -> list[str]:
+    """Phrases where the report treats an IP's address range as evidence."""
+    found: list[str] = []
+    for text in [report.narrative, report.audit_notes, *report.recommended_actions]:
+        for pattern in _IP_RANGE_PATTERNS:
+            for match in pattern.finditer(text):
+                phrase = match.group(0).strip()
+                if phrase.lower() not in (f.lower() for f in found):
+                    found.append(phrase)
+    return found
+
+
+def apply_ip_range_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
+    """Flag (never reject) range-based reasoning; the flag is set by code only."""
+    phrases = find_ip_range_reasoning(report)
+    report.ip_range_reasoning = phrases
+    if phrases:
+        note = IP_RANGE_NOTE.format(phrases="; ".join(f'"{p}"' for p in phrases))
         report.audit_notes = f"{report.audit_notes}\n{note}".strip()
     return report
 
@@ -460,6 +503,7 @@ class Adjudicator:
         else:
             raw = self.trace.call_llm(stage, self.llm.complete, messages)
         report = parse_adjudicator_output(raw)
+        report = apply_ip_range_guard(report)  # before any guard writes notes
         report = apply_confidence_guardrail(report)
         baseline = (
             self.baseline(dossier.user_principal_name) if self.baseline else None
