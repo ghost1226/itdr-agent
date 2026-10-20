@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, next is code-supplied rollbacks (item 10).
+- **What's next:** the **ITDR Dream Run 1** fixes, next is TEST-NET range is never evidence (item 11).
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -200,6 +200,7 @@
 - ✅ Code pre-fetch (2026-10-20, Dream Run 1 items 5-6): `Investigator.investigate()` now calls `get_user_profile`, `get_sign_in_history` and `get_directory_audits` (hours = `BASELINE_HOURS` = 168) in code before the ReAct loop, merges them into the dossier, and feeds them to the model as wrapped untrusted tool results; the trace records them like any tool call, and they do not count toward `MAX_TOOL_CALLS` (the model still gets its own 8 and may re-call a tool with a different window). A missing profile or zero sign-ins returns the dossier with zero model calls (ALERT_010); a `SimulatedGraphError` still retries once per pre-fetch. Red `9b66b7a`, green `897d966`.
 - ✅ Analyst question by trigger (2026-10-20, Dream Run 1 items 7-8): `AdjudicatorOutput` gains code-only `model_verdict`/`model_confidence`, set by `apply_thin_evidence_guard` when it flips a FALSE_POSITIVE; the analyst question is built by code from a trigger — `thin_evidence` ("<upn> has only N sign-ins in the last 7 days. Is a sign-in from <city>, <country> on <date> normal for this user?"), `new_country` ("Is <upn> traveling in <country>, or expected to sign in from there?"), else the verdict and confidence + "What context would help?" — never by the LLM; the `ask_user` audit line records the `trigger`; the verdict box and CLI show "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA because only 2 sign-ins in the last 7 days." instead of a bare "INSUFFICIENT_DATA 0.92". Red `3d64faa`, green `8866e41`; 6 new tests (`tests/test_analyst_question.py`).
 - ✅ No containment on benign/unknown verdicts (2026-10-20, Dream Run 1 item 9; built by Jessica): `apply_no_containment_guard` runs after the thin-evidence guard and moves every containment step on a FALSE_POSITIVE or INSUFFICIENT_DATA verdict into recommended actions ("Optional, analyst's call: <step> (undo: <rollback>)"), sets code-only `moved_containment_steps`, adds an audit note, and the orchestrator logs a `containment_moved` audit line. Nothing reaches approve/edit/reject on those verdicts. Red `c90e377` (5 failed, 1 passed) → green `52713c3`; full suite **428 passed**.
+- ✅ Rollback-warning fatigue (2026-10-20, Dream Run 1 item 10; built by Jessica): the unsafe-rollback guard flagged all 5 after-fix COMPROMISED runs. Likely cause, reproduced offline: the prompt says "never restore an old password" and the model echoes it ("do not restore the previous password"), which matched. (1) `is_unsafe_rollback` skips a match negated within 3 words before its verb ("Without verifying, restore..." stays unsafe). (2) `apply_standard_rollbacks`: a password-reset, MFA re-register or session-revoke step whose rollback is still unsafe gets code's safe rollback (`STANDARD_ROLLBACKS`); the model's text stays in the audit note, `standard_rollbacks` records the indexes, and the orchestrator logs a `standard_rollback` line. Unknown steps keep the analyst warning; warning-path tests now use "Lock the account". Red `950ef7d` → green `0d75c9c`; full suite **445 passed**.
 
 ## Microsoft Graph Schema Sources
 
@@ -259,7 +260,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 7. DONE: thin-evidence confidence kept separate (`3d64faa`)
 8. DONE: targeted analyst question (`3d64faa`)
 9. DONE: no containment on FP or INSUFFICIENT_DATA (`c90e377`, `52713c3`)
-10. Code-supplied rollbacks
+10. DONE: code-supplied rollbacks + negation fix (`950ef7d`, `0d75c9c`)
 11. TEST-NET range is never evidence
 
 **Final evaluation (locked 2026-10-16):** 30/30 runs in `eval/final/` (`0924fc3`) — exact 80.0%, majority-of-3 80%, detection 100%, 0 of 9 benign flagged, MITRE precision 100% / recall 83.3%, agreement 93.3%. Misses: ALERT_004 (app consent) and ALERT_009 (thin data). The separate after-fix run (`eval/after-fix/`, 1 run per alert) is 10/10 with 0 false positives.
@@ -523,3 +524,6 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `b85c569` — analyst-question: update PROGRESS.md (green hash, Dream Run items 7-8 done)
 - `c90e377` — no-containment: red — FALSE_POSITIVE/INSUFFICIENT_DATA steps move to recommended actions
 - `52713c3` — no-containment: green — steps move to recommended actions, containment_moved audit line
+- `f8fd3d1` — no-containment: update PROGRESS.md (Dream Run item 9 done)
+- `950ef7d` — rollback-fatigue: red — negated restores are safe; known one-way steps get a standard rollback
+- `0d75c9c` — rollback-fatigue: green — negation fix, standard rollbacks, standard_rollback audit line
