@@ -242,7 +242,19 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**The ITDR Dream Run 1 fixes, starting with logging** — the next work after the evaluation. The exact fix list comes from the Dream Run 1 review; nothing from the checkpoint plan is outstanding.
+**The ITDR Dream Run 1 fixes, starting with logging** — the next work after the evaluation. The list, in order:
+
+1. DONE: skill escape codes (`b0eabad`)
+2. DONE: PROGRESS sync (`f2c5c0a`)
+3. `scripts/check_progress.py`
+4. Per-run trace logging
+5. Unknown-user short-circuit
+6. Mandatory pre-fetch
+7. Thin-evidence confidence kept separate
+8. Targeted analyst question
+9. No containment on FP or INSUFFICIENT_DATA
+10. Code-supplied rollbacks
+11. TEST-NET range is never evidence
 
 **Final evaluation (locked 2026-10-16):** 30/30 runs in `eval/final/` (`0924fc3`) — exact 80.0%, majority-of-3 80%, detection 100%, 0 of 9 benign flagged, MITRE precision 100% / recall 83.3%, agreement 93.3%. Misses: ALERT_004 (app consent) and ALERT_009 (thin data). The separate after-fix run (`eval/after-fix/`, 1 run per alert) is 10/10 with 0 false positives.
 
