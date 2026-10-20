@@ -136,7 +136,7 @@ def test_dossier_flags_missing_optional_data_not_critical():
     ]
     dossier = Investigator(ScriptedLLM(actions)).investigate(alert)
     assert dossier.user_profile is not None
-    assert dossier.directory_audits == []
+    assert dossier.device_trust is None  # the model never asked for it
     assert dossier.is_critical_gap is False
 
 
@@ -198,11 +198,63 @@ def test_unknown_user_alert_is_critical_gap():
         },
         {"action": "final"},
     ]
-    dossier = Investigator(ScriptedLLM(actions)).investigate(alert)
+    llm = ScriptedLLM(actions)
+    dossier = Investigator(llm).investigate(alert)
     assert dossier.is_critical_gap is True
     assert dossier.user_profile is None
     assert dossier.sign_in_history == []
     assert any("profile" in gap.lower() for gap in dossier.data_gaps)
+    # The code pre-fetch found the gap, so the model is never called.
+    assert llm.turns == 0
+
+
+def test_code_prefetch_runs_three_tools_before_the_model():
+    from itdr_agent.adjudicator import BASELINE_HOURS
+    from itdr_agent.investigator import Investigator
+    from itdr_agent.tools import call_tool
+
+    calls: list[tuple[str, dict]] = []
+
+    def recording_tool(name, arguments):
+        calls.append((name, arguments))
+        return call_tool(name, arguments)
+
+    llm = ScriptedLLM([{"action": "final"}])
+    dossier = Investigator(llm, tool_executor=recording_tool).investigate(
+        _alert("impossible_travel")
+    )
+
+    assert [name for name, _ in calls] == [
+        "get_user_profile",
+        "get_sign_in_history",
+        "get_directory_audits",
+    ]
+    assert calls[1][1]["hours"] == BASELINE_HOURS == 168
+    assert calls[2][1]["hours"] == BASELINE_HOURS == 168
+    assert llm.turns == 1  # the model still gets its own turn after the fetches
+    assert dossier.user_profile is not None
+
+
+def test_alert_010_makes_zero_model_calls():
+    from itdr_agent.fixture_store import get_store
+    from itdr_agent.investigator import Investigator
+
+    alert = next(a for a in get_store().alerts if a["id"] == "ALERT_010")
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "tool",
+                "tool": "get_user_profile",
+                "arguments": {"upn": alert["userPrincipalName"]},
+            }
+        ]
+    )
+    dossier = Investigator(llm).investigate(alert)
+
+    assert llm.turns == 0
+    assert dossier.is_critical_gap
+    assert dossier.user_profile is None
+    assert dossier.sign_in_history == []
 
 
 # --- Deterministic error handling -----------------------------------------
@@ -236,22 +288,27 @@ def test_transient_error_retry_succeeds_without_gap():
     from itdr_agent.investigator import Investigator
     from itdr_agent.tools import call_tool
 
-    state = {"attempts": 0}
+    state = {"failed": False}
 
     def flaky(name, arguments):
-        state["attempts"] += 1
-        if state["attempts"] == 1:
+        # Fail once on a model-chosen tool; the pre-fetches must succeed.
+        if name == "get_device_trust" and not state["failed"]:
+            state["failed"] = True
             raise SimulatedGraphError(429, "simulated first-attempt failure")
         return call_tool(name, arguments)
 
     actions = [
-        {"action": "tool", "tool": "get_user_profile", "arguments": {"upn": ALICE}},
+        {
+            "action": "tool",
+            "tool": "get_device_trust",
+            "arguments": {"device_id": _device_id(ALICE)},
+        },
         {"action": "final"},
     ]
     inv = Investigator(ScriptedLLM(actions), tool_executor=flaky)
     dossier = inv.investigate(_alert("impossible_travel"))
-    assert inv.tool_calls_made == 2
-    assert dossier.user_profile is not None
+    assert inv.tool_calls_made == 2  # the model's call + its retry
+    assert dossier.device_trust is not None
     assert not any("429" in gap for gap in dossier.data_gaps)
 
 

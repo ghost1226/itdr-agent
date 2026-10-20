@@ -448,7 +448,17 @@ def test_orchestrator_hands_its_deadline_to_the_investigator(tmp_path):
                     "arguments": {"upn": ALICE}}
 
     tool_llm = SlowToolLLM()
-    inv = Investigator(tool_llm, tool_executor=lambda name, args: {"userPrincipalName": ALICE})
+
+    def tool_executor(name, args):
+        # The code pre-fetch needs a profile and at least one sign-in to get
+        # past the critical-gap check and into the model loop.
+        if name == "get_sign_in_history":
+            return [{"id": "s1", "createdDateTime": "2025-01-15T09:00:00Z"}]
+        if name == "get_directory_audits":
+            return []
+        return {"userPrincipalName": ALICE}
+
+    inv = Investigator(tool_llm, tool_executor=tool_executor)
     llm = CompleteLLM([_report()])
     audit = tmp_path / "audit.jsonl"
     orch = Orchestrator(

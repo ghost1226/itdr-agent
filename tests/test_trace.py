@@ -142,12 +142,32 @@ def test_trace_records_tool_calls_in_order_with_rows(tmp_path):
     orch.run(ALERT, run_id="r-tools")
 
     payload = json.loads((tmp_path / "runs" / "r-tools.json").read_text())
-    assert [call["name"] for call in payload["tool_calls"]] == [
+    calls = payload["tool_calls"]
+    # The code pre-fetches come first, then the model's own calls.
+    assert [call["name"] for call in calls] == [
+        "get_user_profile",
+        "get_sign_in_history",
+        "get_directory_audits",
         "get_user_profile",
         "get_sign_in_history",
     ]
-    assert [call["rows"] for call in payload["tool_calls"]] == [1, 2]
-    assert payload["tool_calls"][1]["arguments"] == {"upn": ALICE}
+    assert [call["rows"] for call in calls] == [1, 2, 0, 1, 2]
+    assert all("rows" in call for call in calls)
+
+
+def test_trace_starts_with_the_three_prefetches(tmp_path):
+    orch, _audit = make_orchestrator(tmp_path, mode="mock")
+    orch.run(ALERT, run_id="r-prefetch")
+
+    payload = json.loads((tmp_path / "runs" / "r-prefetch.json").read_text())
+    first_three = payload["tool_calls"][:3]
+    assert [call["name"] for call in first_three] == [
+        "get_user_profile",
+        "get_sign_in_history",
+        "get_directory_audits",
+    ]
+    assert first_three[1]["arguments"]["hours"] == 168
+    assert first_three[2]["arguments"]["hours"] == 168
 
 
 def test_trace_records_every_llm_request_with_stage_and_seconds(tmp_path):

@@ -120,9 +120,13 @@ def test_tool_calls_are_recorded_in_order(tmp_path):
     assert [c["tool"] for c in run.tool_calls] == [
         "get_user_profile",
         "get_sign_in_history",
+        "get_directory_audits",
+        "get_user_profile",
+        "get_sign_in_history",
     ]
     assert all(c["ok"] for c in run.tool_calls)
     assert run.tool_calls[0]["arguments"] == {"upn": _alert()["userPrincipalName"]}
+    assert run.tool_calls[1]["arguments"]["hours"] == 168
 
 
 def test_waits_for_review_then_approve_finishes(tmp_path):
@@ -355,10 +359,15 @@ def test_failed_tool_call_is_recorded_and_the_run_continues(tmp_path):
     run = GuiRun(build, _alert(), tool_call=flaky)
     run.start()
     run.wait(WAIT)
-    # retried once, both attempts failed, critical gap -> no model call
+    # Each of the 3 pre-fetches is retried once; all fail, critical gap ->
+    # no model call.
     assert [(c["tool"], c["ok"]) for c in run.tool_calls] == [
         ("get_user_profile", False),
         ("get_user_profile", False),
+        ("get_sign_in_history", False),
+        ("get_sign_in_history", False),
+        ("get_directory_audits", False),
+        ("get_directory_audits", False),
     ]
     assert "429" in run.tool_calls[0]["error"]
     assert run.status == "done"
