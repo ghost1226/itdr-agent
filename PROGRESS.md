@@ -2,13 +2,13 @@
 
 **Where this lives:** `~/itdr-agent` (private GitHub `ghost1226/itdr-agent`) since 2026-10-12. The copy inside `~/ai-agents-class` is frozen.
 
-Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74fb`); README.md written. Partner's 15 runs still pending. Output-token cap added (`MAX_OUTPUT_TOKENS`, `7fefa50`); OpenRouter key swapped in `.env`. Problem #22 fixed: `CliReviewer` no longer approves by default (`30d2503`/`2d56034`). GUI batch 1 done (verdict shown before decisions, alert summaries + incident note, incident queue). 336 tests.
-
 ---
 
-## Current Checkpoint
+## State as of 2026-10-20
 
-**Checkpoint 7 — live evaluation running (split 15/15 with Joe's partner). Joe's half: 15 of 15 runs done (day 1 `7990b79`, day 2 `3c65367`, day 3 `a7f74fb`). Partner's half pending, then `--combine eval eval/partner`. Fixes 2 and 3 landed mid-eval; see below for which runs came before them. README.md done (Final Step); refresh its eval section after the combine.**
+- **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
+- **What's next:** the **ITDR Dream Run 1** fixes, starting with logging.
+- **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
 
@@ -193,7 +193,7 @@ Updated 2026-10-14: Joe's half of the live evaluation is complete (15/15, `a7f74
   - **Fix found in review:** `SUSPICIOUS` had no conclusion line. Red `3331ca2` / green `71143b7` (+ a test that every `Verdict` has one). **336 passed.**
   - Review: frozen eval files 0-line diff, `ScriptedReviewer` byte-identical; 0 IP / answer-key leaks across all 10 alerts x 4 verdicts; offline Chrome click-through (queue → search → open → verdict above step → approve → incident note → Closed).
   - Open: Back to queue while a run waits on the analyst drops that run (thread stays blocked, status stuck at "Waiting on you").
-- ✅ Skill doc sync (2026-10-20, Joe: "one fix only"): `.agents/skills/untrusted-data-wrapping/SKILL.md` rule 1 now reads "replace `<` with `\u003c` and `>` with `\u003e`" — the escape codes had been lost (it read "replace `<` with `<` and `>` with `>`"). Matches `itdr_agent/tools.py` (`wrap_tool_output`, `wrap_analyst_input`). Doc only; no code or tests changed.
+- ✅ Skill doc sync (2026-10-20, Joe: "one fix only"): `.agents/skills/untrusted-data-wrapping/SKILL.md` rule 1 now reads "replace `<` with `\u003c` and `>` with `\u003e`" — the escape codes had been lost (it read "replace `<` with `<` and `>` with `>`"). Matches `itdr_agent/tools.py` (`wrap_tool_output`, `wrap_analyst_input`). Doc only; no code or tests changed. Commit `b0eabad`.
 
 ## Microsoft Graph Schema Sources
 
@@ -242,18 +242,9 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**Checkpoint 1b — complete ...; 106 tests). Checkpoint 4 task 8 — complete (`377d586`/`5dd360d`; 112 tests). Checkpoint 5 — complete (`a2ed3f5`/`cdac646`, then `2e6a950`/`221a907`, `01212d6`/`c6d7132`, `45ebedd`/`8e8912c`; 153 tests). Checkpoint 6 — complete (`efe5d05`/`b6d266d`; 165 tests).**
+**The ITDR Dream Run 1 fixes, starting with logging** — the next work after the evaluation. The exact fix list comes from the Dream Run 1 review; nothing from the checkpoint plan is outstanding.
 
-**Eval model switched (Joe, 2026-10-12): `nvidia/nemotron-3-super-120b-a12b:free`.** `google/gemma-4-31b-it:free` returned 429 "temporarily rate-limited upstream" on both smoke attempts (2 requests spent; both logged in `eval/interruptions.jsonl`, no runs scored). Nemotron verified on the OpenRouter models API + page (HTTP 200): NVIDIA Nemotron 3 Super (free), 120B hybrid MoE (12B active), 262,144-token context, `0`/`0` pricing, supports `response_format`, `temperature`. It is now `EVAL_DEFAULT_MODEL` in `scripts/evaluate.py` (override with `--model` or `EVAL_MODEL`); the CLI demo keeps Gemma; every scored run uses this one model. **Smoke test PASSED:** ALERT_001 run 1 → COMPROMISED, 0.92, `T1078.004`, 8 requests, 11,942/3,028 tokens, 53 s. Finding: its `audit_notes` said "Containment steps executed as per playbook" — false, the agent executes nothing (same overclaim as HW4); added to the results caveats.
-
-**Next: the live evaluation — only on Joe's go.** Joe's key is in `.env` (free tier, 50 requests/day; Joe chose to stay free, 2026-10-12).
-1. ~~Smoke test first~~ DONE (passed on Nemotron): `python scripts/evaluate.py --live --alerts ALERT_001 --runs 1` (≤ 10 requests). Check `eval/results.md`, `eval/raw.jsonl`, and that the free model accepts `response_format=json_object`.
-2. Then `python scripts/evaluate.py --live` once per UTC day until `Runs still pending: 0` (about 5 days). Each session stops on its own before the cap.
-3. Commit `eval/results.md`, `eval/raw.jsonl`, `eval/interruptions.jsonl` after each day.
-**Evaluation DONE 2026-10-16:** the partner's 15 runs came in as PR #1 (`partner-eval`, only `eval/partner/`), merged by Joe (`33c00f8`); `--combine eval eval/partner` → `eval/final/` (`0924fc3`): 30/30, 0 failed, exact 80.0%, majority-of-3 80% (misses ALERT_004 app consent, ALERT_009 thin data), detection 100%, 0 of 9 benign flagged, MITRE P 100% / R 83.3%, agreement 93.3%. README eval section refreshed.
-4. Then PROJECT_BRIEF.md (needs Joe's manual baseline numbers) and the README. **Started 2026-10-13:** `PROJECT_BRIEF.md` has section 7 (Limits and risks, approved by Joe, every claim cited, Claims-to-verify table); sections 1-6 and 9 added 2026-10-13 (approved by Joe; Microsoft comparison checked on Microsoft Learn: Entra ID Protection, Identity Risk Management Agent (preview; PLAN's "Risk Management agent"), Purview DLP Triage Agent); only 8 left, blocked on Joe's baseline. Refresh section 7's numbers when the eval finishes. **Done 2026-10-16 (Joe: "approve"): section 7 refreshed to the final 30-run numbers** (at least 18 runs predate `d0d6b15`; the `7fefa50` output cap added as a mid-eval change; ALERT_004 and ALERT_009 misses; new citations P9, P10). **PROJECT_BRIEF section 8 written 2026-10-16 (Joe: "approve"):** Joe's manual baseline is 30 to 60 minutes per identity alert (his estimate, not timed) vs 44.3 s of agent machine time plus unmeasured analyst review; citations B1, C5. The brief is complete.
-
-~~Open: the orchestrator's total timeout was never enforced.~~ **Fixed 2026-10-13** (`ccb1b61`/`d0d6b15`).
+**Final evaluation (locked 2026-10-16):** 30/30 runs in `eval/final/` (`0924fc3`) — exact 80.0%, majority-of-3 80%, detection 100%, 0 of 9 benign flagged, MITRE precision 100% / recall 83.3%, agreement 93.3%. Misses: ALERT_004 (app consent) and ALERT_009 (thin data). The separate after-fix run (`eval/after-fix/`, 1 run per alert) is 10/10 with 0 false positives.
 
 ## Mistakes & Lessons
 
@@ -303,7 +294,6 @@ Standing prevention rules distilled from the above:
 | Own repo: `~/itdr-agent` → private `ghost1226/itdr-agent` (2026-10-12) | Joe's partner runs half the evaluation and a review group will read the code; they get just this project. Full history kept (red/green commits are evidence). The old `~/ai-agents-class/itdr-agent` copy is frozen so the two never drift. |
 | Lightweight deps | Dropped `presidio-analyzer` (pulls spaCy + large model) and `python-docx` (unused). Synthetic domain regex check is sufficient for anonymization. |
 | Fixtures: commit them | Fake, small, deterministic JSONL. Tests can also regenerate from seed. |
-| `get_risky_user_report` | Dropped from Investigator tool registry. The agent already infers risk from sign-in history and directory audits. Keeps tool count lean. |
 | `riskEventTypes_v2`, not the deprecated `riskEventTypes` | Matches current Graph; anonymous IP surfaces here as `anonymizedIPAddress`. |
 | Impossible travel value is `unlikelyTravel` | That is the real `riskEventTypes_v2` value; "impossibleTravel" does not exist in the enum. |
 | MITRE IDs corrected | anonymous IP `T1090.003`, app consent `T1528`, privilege escalation `T1098.003` (review feedback). |
@@ -342,23 +332,6 @@ Standing prevention rules distilled from the above:
 | Detection accuracy excludes the 2 INSUFFICIENT_DATA alerts | They are neither attack nor benign; exact accuracy already scores them. |
 | Alert is allowlisted + wrapped like tool output | The full alert record (including `scenario`) must never reach the model; `build_alert_prompt` applies `ALERT_FIELD_ALLOWLIST` and the untrusted-data wrapper. |
 
-## Free OpenRouter Model (Checkpoint 5)
-
-Verified against `https://openrouter.ai/api/v1/models` and the model page
-`https://openrouter.ai/google/gemma-4-31b-it:free` (HTTP 200) in the pre-code
-check; no live tokens spent.
-
-| Field | Value |
-|---|---|
-| Model id | `google/gemma-4-31b-it:free` |
-| Name | Google: Gemma 4 31B (free) |
-| Pricing (prompt / completion) | `0` / `0` (free tier) |
-| Context length | 262,144 tokens |
-| Page | https://openrouter.ai/google/gemma-4-31b-it:free |
-
-`EVAL_MODEL` and the adjudicator integration script default to this id. The
-live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go.
-
 ## Open Problems
 
 1. ~~**Which free OpenRouter model?**~~ **Resolved (Checkpoint 5):** `google/gemma-4-31b-it:free`, confirmed free with a 262,144-token context on the OpenRouter models API and model page.
@@ -374,19 +347,17 @@ live script (`scripts/run_adjudicator_live.py`) is **not** run until Joe says go
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
 
 12. **Thin-data threshold picked knowing the test data (2026-10-16).** `MIN_BASELINE_SIGN_INS = 3` matches the generator's thin_data (1-2 sign-ins); ALERT_006 has exactly 3. Judgment call, not measured.
-13. **Whole conversation resent every call (2026-10-16).** ~12k tokens/alert, mostly raw sign-ins resent on each investigator turn. Fix 2 in progress.
-14. **Investigator skips needed tools (2026-10-16).** ALERT_004 runs 1-2 never fetched directory audits → missed T1528. Not fixed; watch in the after-fix eval.
 15. **Shared test dossier is thin (2026-10-16).** 1 sign-in, no audits; one test adjusted to 3 sign-ins in `d12a110`.
 16. **Output tokens not fully explained (2026-10-16).** Likely hidden reasoning; unverified.
 17. **Eval records have no code version (2026-10-16).** `raw.jsonl` lacks a commit hash.
-18. ~~**Edit can't fix an unsafe rollback (2026-10-16).**~~ **Fixed 2026-10-16** (`2606755`). `ContainmentDecision` carries only `edited_step`; an edit keeps the original rollback. The unsafe-rollback warning says "Edit it before approving", which the analyst can't actually do, so the only safe choice today is Reject.
-19. ~~**After-fix eval partly stale (2026-10-16).**~~ **Resolved 2026-10-18:** ALERT_006/008/009 re-run on the current prompt (008 again after #34). `eval/after-fix` ALERT_006, ALERT_008 and ALERT_009 ran with the prompt rule removed in problem #33. Re-run them on the current prompt before quoting after-fix accuracy.
 20. **After-fix is 1 run per alert (2026-10-18).** Joe's call ("1 run each"): proof the #14/#34 fixes work, not a new 3-run accuracy number. The locked final eval (`eval/final/`) stays the headline.
 21. **Baseline window picked knowing the test data (2026-10-18).** `BASELINE_HOURS = 168` covers every fixture user's full history. A real tenant needs a window chosen from real alert volume.
 
 Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): Joe's vault, "ITDR Agent — Build Journal", "Problems to talk about".
 
 ## Commit History
+
+_Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the frozen pre-move copy and do not resolve in this repo — the move rewrote them, so those entries are historical labels, not current hashes. The block below lists the current repo's commits that were missing from the list; remapping the older entries to this repo's history is a separate pass._
 
 - `f186259` — checkpoint-0: skeleton, venv, pinned deps, pip-audit clean, red-green TDD
 - `5528d5e` — checkpoint-0: update PROGRESS.md
@@ -479,3 +450,39 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 - `972ee9a` — problem-33: green — prompt rule removed; code guard only
 - `dd730bd` — problem-34: red — thin-data guard must use its own 7-day baseline
 - `8e5db38` — problem-34: green — guard counts the user's last 7 days itself
+
+**Previously missing from this list (added 2026-10-20):**
+
+- `1e1b3c8` — Move home to its own repo (~/itdr-agent); freeze the ai-agents-class copy
+- `9174eb4` — Partner evaluation results
+- `720e87f` — checkpoint-7-fix2: update PROGRESS.md (timeout + action-claim guard, mid-eval note)
+- `416d235` — PROJECT_BRIEF: section 7 Limits and risks (cited, claims to verify); other sections stubbed
+- `c8ca54d` — PROJECT_BRIEF: sections 1-6 (problem, users, why agentic, definition of done, flow, Microsoft comparison) and section 9 citations
+- `9cc8f7b` — checkpoint-7-fix3: update PROGRESS.md (unsafe-rollback guard)
+- `8d63557` — PROJECT_BRIEF: note fix 3 (unsafe-rollback guard) in 7.2 and 7.5, with citations
+- `7d96abd` — Final step: README (all 13 PLAN items) + PROGRESS update
+- `2bcef30` — gui: optional Streamlit dependency (requirements-gui.txt), usage stats off, localhost only
+- `eeb58c8` — gui: red — GuiRun controller tests (tool-call log, ask/answer/cancel, approve/edit/reject, warnings, timeout, errors)
+- `b35af8b` — gui: green — GuiRun runs the orchestrator on a worker thread and is its reviewer
+- `3455cd0` — gui: red — app.py page tests (offline AppTest: tool calls, approve/edit/reject, ask/answer/skip, short-circuit, key never shown)
+- `12112dc` — gui: green — app.py local Streamlit reviewer (offline demo + live mode)
+- `ae0feae` — gui: hide Streamlit's Deploy button (toolbarMode minimal); this app is localhost-only
+- `de1525e` — gui-fix: red — a slow run must not rerun the whole page while working (live mode flashed)
+- `a68a2b0` — gui-fix: green — while working, update the tool-call list in place under a spinner; rerun once when the run needs the analyst or ends
+- `674534a` — problem-22: update PROGRESS.md (red/green hashes, 301 tests)
+- `ea0e60b` — gui-batch1: update PROGRESS.md (batch 1 done, 336 tests)
+- `1500652` — Partner evaluation results
+- `8b9c97e` — README + PROGRESS: combined evaluation results
+- `715c8ef` — token-meter: update PROGRESS.md (live check matched)
+- `116aeec` — PROJECT_BRIEF section 7: final 30-run numbers
+- `1c2cfe8` — PROJECT_BRIEF section 8: practical value
+- `6e23cdd` — PROGRESS: thin-evidence guard, token cut, new open problems 12-17
+- `d74bfff` — README: Run the GUI section
+- `8cbc977` — verdict-box: update PROGRESS.md
+- `6f254da` — verdict-box-top: update PROGRESS.md
+- `f5df2f6` — default-model: update PROGRESS.md (#11 fixed)
+- `9e75a11` — problem-31: update PROGRESS.md; open problem 18 (edit can't change a rollback)
+- `31da58d` — problem-32: update PROGRESS.md
+- `2316e52` — problem-33: update PROGRESS.md
+- `b32c8d6` — after-fix eval complete (1 run per alert) + README/brief/PROGRESS notes
+- `b0eabad` — skill-doc: restore lost escape codes in untrusted-data-wrapping rule 1
