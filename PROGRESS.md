@@ -347,6 +347,7 @@ Standing prevention rules distilled from the above:
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
 
 12. **Thin-data threshold picked knowing the test data (2026-10-16).** `MIN_BASELINE_SIGN_INS = 3` matches the generator's thin_data (1-2 sign-ins); ALERT_006 has exactly 3. Judgment call, not measured.
+14. **Investigator skips needed tools** — ALERT_004 runs 1-2 and ALERT_007 run 3 never fetched directory audits (3 of 30 eval runs). Fix planned: Dream Run 1 fix 5 (code pre-fetches profile, sign-ins, directory audits).
 15. **Shared test dossier is thin (2026-10-16).** 1 sign-in, no audits; one test adjusted to 3 sign-ins in `d12a110`.
 16. **Output tokens not fully explained (2026-10-16).** Likely hidden reasoning; unverified.
 17. **Eval records have no code version (2026-10-16).** `raw.jsonl` lacks a commit hash.
@@ -357,7 +358,7 @@ Full discussion list (incl. Pi's draft gaps and the build-agent budget stall): J
 
 ## Commit History
 
-_Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the frozen pre-move copy and do not resolve in this repo — the move rewrote them, so those entries are historical labels, not current hashes. The block below lists the current repo's commits that were missing from the list; remapping the older entries to this repo's history is a separate pass._
+_Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy and resolve in the frozen `~/ai-agents-class` repo, not this one, so those entries are historical labels, not current hashes. The block below lists the current repo's commits that were missing from the list._
 
 - `f186259` — checkpoint-0: skeleton, venv, pinned deps, pip-audit clean, red-green TDD
 - `5528d5e` — checkpoint-0: update PROGRESS.md
