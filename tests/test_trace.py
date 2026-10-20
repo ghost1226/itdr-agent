@@ -10,6 +10,7 @@ Offline only: scripted LLMs and fake tools, no network, no API key.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -211,14 +212,102 @@ def test_run_line_has_model_mode_and_trace_path(tmp_path):
     assert result.trace_path == Path(run["trace_path"])
 
 
-def test_dirty_tree_adds_the_dirty_suffix(tmp_path):
-    orch, audit = make_orchestrator(tmp_path, mode="mock", dirty=True)
-    orch.run(ALERT, run_id="r-dirty")
+def test_run_line_has_a_commit_field_and_a_plain_mode(tmp_path):
+    orch, audit = make_orchestrator(tmp_path, mode="live", dirty=False)
+    orch.run(ALERT, run_id="r-commit")
+
+    run = next(e for e in run_entries(audit) if e["event"] == "run")
+    assert run["mode"] == "live"
+    assert re.fullmatch(r"[0-9a-f]{7,40}", run["commit"])
+
+
+def test_commit_gets_dirty_but_mode_stays_plain(tmp_path):
+    orch, _audit = make_orchestrator(tmp_path, mode="mock", dirty=True)
+    orch.run(ALERT, run_id="r-commit-dirty")
 
     run = next(
         e for e in run_entries(tmp_path / "audit-mock.jsonl") if e["event"] == "run"
     )
-    assert run["mode"] == "mock+dirty"
+    assert run["mode"] == "mock"
+    assert run["commit"].endswith("+dirty")
+
+
+def test_default_mode_is_unknown(tmp_path):
+    orch = Orchestrator(
+        make_investigator(),
+        Adjudicator(CompleteLLM([_report()])),
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        dirty=False,
+        model="test/model",
+    )
+    orch.run(ALERT, run_id="r-default")
+
+    run = next(
+        e for e in run_entries(tmp_path / "audit.jsonl") if e["event"] == "run"
+    )
+    assert run["mode"] == "unknown"
+
+
+def test_trace_is_written_on_failure_with_an_error_field(tmp_path):
+    class RaisingAdjudicator:
+        def __init__(self) -> None:
+            self.trace = None
+
+        def adjudicate(self, dossier, stage="adjudication"):
+            raise RuntimeError("model exploded")
+
+    orch = Orchestrator(
+        make_investigator(),
+        RaisingAdjudicator(),
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        mode="mock",
+        dirty=False,
+        model="test/model",
+    )
+    with pytest.raises(RuntimeError):
+        orch.run(ALERT, run_id="r-fail")
+
+    payload = json.loads((tmp_path / "runs" / "r-fail.json").read_text())
+    assert payload["error"] == "RuntimeError"
+    assert payload["dossier"] is not None
+    assert payload["report"] is None
+
+
+def test_tool_error_is_recorded_as_the_exception_class(tmp_path):
+    def exploding_tool(name, arguments):
+        raise ValueError("no such tool")
+
+    investigator = Investigator(
+        ScriptedToolLLM(
+            [
+                {
+                    "action": "tool",
+                    "tool": "get_user_profile",
+                    "arguments": {"upn": ALICE},
+                },
+                {"action": "final"},
+            ]
+        ),
+        tool_executor=exploding_tool,
+    )
+    orch = Orchestrator(
+        investigator,
+        Adjudicator(CompleteLLM([_report()])),
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        mode="mock",
+        dirty=False,
+        model="test/model",
+    )
+    with pytest.raises(ValueError):
+        orch.run(ALERT, run_id="r-tool-error")
+
+    payload = json.loads((tmp_path / "runs" / "r-tool-error.json").read_text())
+    call = payload["tool_calls"][0]
+    assert call["error"] == "ValueError"
+    assert "rows" not in call
 
 
 # --- mock / offline audit file ---------------------------------------------
