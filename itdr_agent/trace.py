@@ -37,6 +37,7 @@ class RunTrace:
         self.tool_calls: list[dict[str, Any]] = []
         self.llm_requests: list[dict[str, Any]] = []
         self.analyst_answers: list[dict[str, Any]] = []
+        self.error: str | None = None
 
     def record_tool_call(
         self, name: str, arguments: dict[str, Any], result: Any
@@ -44,6 +45,21 @@ class RunTrace:
         self.tool_calls.append(
             {"name": name, "arguments": arguments, "rows": count_rows(result)}
         )
+
+    def record_tool_error(
+        self, name: str, arguments: dict[str, Any], exc: BaseException
+    ) -> None:
+        self.tool_calls.append(
+            {
+                "name": name,
+                "arguments": arguments,
+                "error": type(exc).__name__,
+            }
+        )
+
+    def record_error(self, exc: BaseException) -> None:
+        """The run failed; keep the exception class name in the trace."""
+        self.error = type(exc).__name__
 
     def record_analyst_answer(self, result: Any) -> None:
         self.analyst_answers.append(
@@ -91,6 +107,7 @@ class RunTrace:
                 report.model_dump(mode="json") if report is not None else None
             ),
             "analyst_answers": self.analyst_answers,
+            "error": self.error,
         }
 
     def write(self, path: str | Path, dossier: Any = None, report: Any = None) -> Path:

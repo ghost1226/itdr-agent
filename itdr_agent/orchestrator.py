@@ -74,6 +74,22 @@ def _tree_is_dirty(repo: Path = PROJECT_ROOT) -> bool:
         return False
     return bool(result.stdout.strip())
 
+
+def _git_short_hash(repo: Path = PROJECT_ROOT) -> str:
+    """The current commit's short hash, or ``unknown`` outside a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return "unknown"
+    if result.returncode != 0:
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
 ALLOWED_EMAIL_DOMAINS = {"contoso.com"}
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+)")
 
@@ -134,7 +150,7 @@ class Orchestrator:
         clock: Callable[[], float] = time.monotonic,
         token_meter: TokenMeter | None = None,
         model: str | None = None,
-        mode: str = "live",
+        mode: str = "unknown",
         dirty: bool | None = None,
     ) -> None:
         self.investigator = investigator
@@ -143,6 +159,7 @@ class Orchestrator:
         self.model = model
         self.mode = mode
         self._dirty = dirty
+        self._commit: str | None = None
         self._trace: RunTrace | None = None
         self.audit_log = Path(audit_log) if audit_log else DEFAULT_AUDIT_LOG
         if mode in ("mock", "offline"):
@@ -175,72 +192,82 @@ class Orchestrator:
             if hasattr(target, "trace"):
                 target.trace = self._trace
 
-        assert_synthetic(alert)  # governance: no real domains
-
-        self._deadline = self.clock() + self.timeout_seconds
-        if hasattr(self.investigator, "deadline"):
-            self.investigator.deadline = self._deadline
-            self.investigator.clock = self.clock
+        dossier: InvestigatorOutput | None = None
+        report: AdjudicatorOutput | None = None
         try:
-            dossier = self.investigator.investigate(alert)
-        except InvestigationTimeoutError as exc:
-            self._log_timeout(run_id, alert_id, "investigation")
-            raise OrchestrationTimeoutError(str(exc)) from exc
-        tool_calls = getattr(self.investigator, "tool_calls_made", 0)
-        llm_called = False
-        short_circuited = False
+            assert_synthetic(alert)  # governance: no real domains
 
-        if dossier.is_critical_gap:
-            short_circuited = True
-            report = self._critical_gap_report()
-        else:
-            self._check_deadline(run_id, alert_id, "adjudication")
-            report = self._adjudicate(dossier, run_id)  # logs+raises on bad MITRE
-            llm_called = True
-            if self._should_ask(report):
-                self._show_report(report, dossier)
-                report = self._ask_and_maybe_readjudicate(
-                    alert_id, dossier, report, run_id
-                )
+            self._deadline = self.clock() + self.timeout_seconds
+            if hasattr(self.investigator, "deadline"):
+                self.investigator.deadline = self._deadline
+                self.investigator.clock = self.clock
+            try:
+                dossier = self.investigator.investigate(alert)
+            except InvestigationTimeoutError as exc:
+                self._log_timeout(run_id, alert_id, "investigation")
+                raise OrchestrationTimeoutError(str(exc)) from exc
+            tool_calls = getattr(self.investigator, "tool_calls_made", 0)
+            llm_called = False
+            short_circuited = False
 
-        report = self._review_containment(alert_id, dossier, report, run_id)
-        report = apply_confidence_guardrail(report)
+            if dossier.is_critical_gap:
+                short_circuited = True
+                report = self._critical_gap_report()
+            else:
+                self._check_deadline(run_id, alert_id, "adjudication")
+                report = self._adjudicate(dossier, run_id)  # logs+raises on bad MITRE
+                llm_called = True
+                if self._should_ask(report):
+                    self._show_report(report, dossier)
+                    report = self._ask_and_maybe_readjudicate(
+                        alert_id, dossier, report, run_id
+                    )
 
-        self._trace.write(trace_path, dossier=dossier, report=report)
-        self._append(
-            run_id,
-            {
-                "event": "run",
-                "timestamp": _now(),
-                "alert_id": alert_id,
-                "tool_calls": tool_calls,
-                "dossier_hash": _sha256(dossier.model_dump_json()),
-                "report_hash": _sha256(report.model_dump_json()),
-                "verdict": report.verdict.value,
-                "confidence": report.confidence,
-                "short_circuited": short_circuited,
-                "llm_called": llm_called,
-                "questions_asked": self._questions_asked,
-                "re_adjudications": self._re_adjudications,
-                "model": self.model,
-                "mode": self._mode(),
-                "trace_path": str(trace_path),
-                **self._token_fields(),
-            },
-        )
-        return OrchestrationResult(
-            alert_id=alert_id,
-            dossier=dossier,
-            report=report,
-            llm_called=llm_called,
-            short_circuited=short_circuited,
-            questions_asked=self._questions_asked,
-            re_adjudications=self._re_adjudications,
-            audit_path=self.audit_log,
-            run_id=run_id,
-            tokens=self._tokens(),
-            trace_path=trace_path,
-        )
+            report = self._review_containment(alert_id, dossier, report, run_id)
+            report = apply_confidence_guardrail(report)
+
+            self._append(
+                run_id,
+                {
+                    "event": "run",
+                    "timestamp": _now(),
+                    "alert_id": alert_id,
+                    "tool_calls": tool_calls,
+                    "dossier_hash": _sha256(dossier.model_dump_json()),
+                    "report_hash": _sha256(report.model_dump_json()),
+                    "verdict": report.verdict.value,
+                    "confidence": report.confidence,
+                    "short_circuited": short_circuited,
+                    "llm_called": llm_called,
+                    "questions_asked": self._questions_asked,
+                    "re_adjudications": self._re_adjudications,
+                    "model": self.model,
+                    "mode": self.mode,
+                    "commit": self._commit_label(),
+                    "trace_path": str(trace_path),
+                    **self._token_fields(),
+                },
+            )
+            return OrchestrationResult(
+                alert_id=alert_id,
+                dossier=dossier,
+                report=report,
+                llm_called=llm_called,
+                short_circuited=short_circuited,
+                questions_asked=self._questions_asked,
+                re_adjudications=self._re_adjudications,
+                audit_path=self.audit_log,
+                run_id=run_id,
+                tokens=self._tokens(),
+                trace_path=trace_path,
+            )
+        except BaseException as exc:
+            self._trace.record_error(exc)
+            raise
+        finally:
+            # Write the trace even when the run fails (timeout, MITRE
+            # rejection, any exception), so a bad run leaves evidence too.
+            self._trace.write(trace_path, dossier=dossier, report=report)
 
     # --- internals ---------------------------------------------------------
 
@@ -485,10 +512,12 @@ class Orchestrator:
         report.unsafe_rollbacks = find_unsafe_rollbacks(report)  # final indexes
         return report
 
-    def _mode(self) -> str:
+    def _commit_label(self) -> str:
+        if self._commit is None:
+            self._commit = _git_short_hash()
         if self._dirty is None:
             self._dirty = _tree_is_dirty()
-        return f"{self.mode}+dirty" if self._dirty else self.mode
+        return f"{self._commit}+dirty" if self._dirty else self._commit
 
     def _tokens(self) -> dict[str, int] | None:
         return None if self.token_meter is None else self.token_meter.snapshot()

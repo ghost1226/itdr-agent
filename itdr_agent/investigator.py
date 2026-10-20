@@ -270,9 +270,9 @@ class Investigator:
     def _run_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         try:
             result = self._execute_tool(name, arguments)
-        except Exception:
+        except Exception as exc:
             if self.trace is not None:
-                self.trace.record_tool_call(name, arguments, None)
+                self.trace.record_tool_error(name, arguments, exc)
             raise
         if self.trace is not None:
             self.trace.record_tool_call(name, arguments, result)
