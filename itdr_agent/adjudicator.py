@@ -280,6 +280,9 @@ def apply_thin_evidence_guard(
     ):
         note = THIN_EVIDENCE_NOTE.format(sign_ins=sign_ins)
         report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+        # Record what the model said before the flip; the human sees both.
+        report.model_verdict = report.verdict.value
+        report.model_confidence = report.confidence
         report.verdict = Verdict.INSUFFICIENT_DATA
         report.thin_evidence = True
     return report

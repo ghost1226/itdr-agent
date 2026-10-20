@@ -90,6 +90,57 @@ def _git_short_hash(repo: Path = PROJECT_ROOT) -> str:
         return "unknown"
     return result.stdout.strip() or "unknown"
 
+
+def build_analyst_question(
+    alert: dict[str, Any],
+    dossier: InvestigatorOutput,
+    report: AdjudicatorOutput,
+) -> tuple[str, str]:
+    """Return ``(trigger, question)`` chosen by code, never by the LLM.
+
+    Triggers, in order:
+      * ``thin_evidence`` -- the guard flipped a FALSE_POSITIVE because the
+        user has too little history; ask about the alert's own sign-in.
+      * ``new_country`` -- the alert's country is not in the user's earlier
+        sign-ins; ask whether the travel is expected.
+      * ``default`` -- the verdict and confidence, then an open question.
+    """
+    upn = dossier.user_principal_name
+    location = alert.get("location") or {}
+    city = location.get("city") or "an unknown city"
+    country = location.get("countryOrRegion") or ""
+    date = (alert.get("createdDateTime") or "")[:10] or "an unknown date"
+
+    if report.thin_evidence:
+        sign_ins = report.baseline_sign_ins
+        if sign_ins is None:
+            sign_ins = len(dossier.sign_in_history)
+        return (
+            "thin_evidence",
+            f"{upn} has only {sign_ins} sign-ins in the last 7 days. Is a "
+            f"sign-in from {city}, {country or 'an unknown country'} on "
+            f"{date} normal for this user?",
+        )
+
+    alert_time = alert.get("createdDateTime") or ""
+    earlier_countries = {
+        (event.get("location") or {}).get("countryOrRegion")
+        for event in dossier.sign_in_history
+        if event.get("createdDateTime", "") < alert_time
+    } - {None, ""}
+    if earlier_countries and country and country not in earlier_countries:
+        return (
+            "new_country",
+            f"Is {upn} traveling in {country}, or expected to sign in from "
+            "there?",
+        )
+
+    return (
+        "default",
+        f"The model said {report.verdict.value} ({report.confidence:.2f}). "
+        "What context would help?",
+    )
+
 ALLOWED_EMAIL_DOMAINS = {"contoso.com"}
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+)")
 
@@ -220,7 +271,7 @@ class Orchestrator:
                 if self._should_ask(report):
                     self._show_report(report, dossier)
                     report = self._ask_and_maybe_readjudicate(
-                        alert_id, dossier, report, run_id
+                        alert, dossier, report, run_id
                     )
 
             report = self._review_containment(alert_id, dossier, report, run_id)
@@ -386,18 +437,15 @@ class Orchestrator:
 
     def _ask_and_maybe_readjudicate(
         self,
-        alert_id: str,
+        alert: dict[str, Any],
         dossier: InvestigatorOutput,
         report: AdjudicatorOutput,
         run_id: str,
     ) -> AdjudicatorOutput:
         if self._questions_asked >= 1:
             return report
-        question = (
-            f"The dossier for {dossier.user_principal_name} produced verdict "
-            f"{report.verdict.value} with confidence {report.confidence:.2f}. "
-            "Do you have context that changes this assessment?"
-        )
+        alert_id = alert.get("id", "")
+        trigger, question = build_analyst_question(alert, dossier, report)
         options = [
             {"label": "The activity is expected/benign"},
             {"label": "The activity is suspicious/malicious"},
@@ -415,6 +463,7 @@ class Orchestrator:
                 "event": "ask_user",
                 "timestamp": _now(),
                 "alert_id": alert_id,
+                "trigger": trigger,
                 "question": question,
                 "status": result.status,
                 "answer": result.answer,

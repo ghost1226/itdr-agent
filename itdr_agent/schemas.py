@@ -92,6 +92,11 @@ class AdjudicatorOutput(BaseModel):
     # the user's sign-ins / directory audits the guard counted (problem #34).
     baseline_sign_ins: int | None = None
     baseline_directory_audits: int | None = None
+    # Set by code (adjudicator.apply_thin_evidence_guard), never by the model:
+    # what the model said before the guard flipped the verdict, so the human
+    # sees "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA".
+    model_verdict: str | None = None
+    model_confidence: float | None = None
 
 
 CONFIDENCE_THRESHOLD = 0.7

@@ -221,7 +221,12 @@ def test_low_confidence_asks_one_question_with_options(tmp_path):
     run.wait(WAIT)
     assert run.status == "question"
     assert run.pending["kind"] == "question"
-    assert "confidence 0.50" in run.pending["question"]
+    # ALERT_001's real dossier has no earlier US sign-in, so the new-country
+    # trigger wins over the default verdict/confidence question.
+    assert run.pending["question"] == (
+        "Is alice.traveler@contoso.com traveling in US, or expected to sign "
+        "in from there?"
+    )
     assert [o["label"] for o in run.pending["options"]] == [
         "The activity is expected/benign",
         "The activity is suspicious/malicious",

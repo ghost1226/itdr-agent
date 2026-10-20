@@ -133,7 +133,7 @@ def test_blank_edit_shows_an_error_and_keeps_the_step(audit):
 
 def test_question_pick_an_option(audit):
     at = _start(_app(), "ALERT_009")
-    assert "Do you have context that changes this assessment?" in _page_text(at)
+    assert "What context would help?" in _page_text(at)
     at.radio(key="answer_choice").set_value("The activity is expected/benign")
     at.button(key="submit_answer").click()
     at.run()
@@ -252,7 +252,7 @@ def test_question_screen_shows_the_verdict_before_answering(audit):
     # The model narrative is on screen before the analyst answers, not only
     # in the question text.
     assert "Insufficient data to reach a verdict" in text
-    assert "Do you have context that changes this assessment?" in text
+    assert "What context would help?" in text
 
 
 # --- Feature 3: incident queue home view -----------------------------------

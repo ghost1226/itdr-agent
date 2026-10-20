@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, starting with thin-evidence confidence kept separate (item 7).
+- **What's next:** the **ITDR Dream Run 1** fixes, starting with no containment on FP or INSUFFICIENT_DATA (item 9).
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -198,6 +198,7 @@
 - ✅ Per-run trace logging (2026-10-20, Dream Run 1 item 4): every run writes `runs/<run_id>.json` beside its audit log — the ordered tool calls (name, arguments, rows), every LLM request (stage, tokens in/out, seconds), the full dossier, the full report (narrative, steps, rollbacks), and the analyst's answers. The `run` audit line now carries `model`, `mode` (`live`/`mock`/`offline`, plus `+dirty` when tracked files differ from HEAD) and `trace_path`; mock/offline runs write `audit-mock.jsonl` instead of `audit.jsonl`; the eval passes its token meter into the orchestrator, so eval audit lines are no longer `tokens: null`. Traces are gitignored like the audit log. Red `315158b`, green `782ef36`; 11 new tests (`tests/test_trace.py`).
 - ✅ Trace follow-up (2026-10-20, before push): the `run` line now carries a `commit` field (git short hash, `+dirty` when tracked files differ from HEAD) and `mode` stays plain; the trace is written on failed runs too (try/finally) with an `error` field (exception class); a tool that raises records `"error": <exception class>` instead of rows 0; `mode` defaults to `unknown`, not `live`. Red `24037a4`, green `bebb40d`; 4 net new tests (15 in `tests/test_trace.py`).
 - ✅ Code pre-fetch (2026-10-20, Dream Run 1 items 5-6): `Investigator.investigate()` now calls `get_user_profile`, `get_sign_in_history` and `get_directory_audits` (hours = `BASELINE_HOURS` = 168) in code before the ReAct loop, merges them into the dossier, and feeds them to the model as wrapped untrusted tool results; the trace records them like any tool call, and they do not count toward `MAX_TOOL_CALLS` (the model still gets its own 8 and may re-call a tool with a different window). A missing profile or zero sign-ins returns the dossier with zero model calls (ALERT_010); a `SimulatedGraphError` still retries once per pre-fetch. Red `9b66b7a`, green `897d966`.
+- ✅ Analyst question by trigger (2026-10-20, Dream Run 1 items 7-8): `AdjudicatorOutput` gains code-only `model_verdict`/`model_confidence`, set by `apply_thin_evidence_guard` when it flips a FALSE_POSITIVE; the analyst question is built by code from a trigger — `thin_evidence` ("<upn> has only N sign-ins in the last 7 days. Is a sign-in from <city>, <country> on <date> normal for this user?"), `new_country` ("Is <upn> traveling in <country>, or expected to sign in from there?"), else the verdict and confidence + "What context would help?" — never by the LLM; the `ask_user` audit line records the `trigger`; the verdict box and CLI show "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA because only 2 sign-ins in the last 7 days." instead of a bare "INSUFFICIENT_DATA 0.92". Red `3d64faa`; 6 new tests (`tests/test_analyst_question.py`).
 
 ## Microsoft Graph Schema Sources
 
@@ -246,7 +247,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 
 ## What's Next
 
-**The ITDR Dream Run 1 fixes, starting with thin-evidence confidence kept separate (item 7)** — the next work after the evaluation. The list, in order:
+**The ITDR Dream Run 1 fixes, starting with no containment on FP or INSUFFICIENT_DATA (item 9)** — the next work after the evaluation. The list, in order:
 
 1. DONE: skill escape codes (`b0eabad`)
 2. DONE: PROGRESS sync (`f2c5c0a`)
@@ -254,8 +255,8 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 4. DONE: per-run trace logging (`315158b`)
 5. DONE: unknown-user short-circuit (`9b66b7a`)
 6. DONE: mandatory pre-fetch (`9b66b7a`)
-7. Thin-evidence confidence kept separate
-8. Targeted analyst question
+7. DONE: thin-evidence confidence kept separate (`3d64faa`)
+8. DONE: targeted analyst question (`3d64faa`)
 9. No containment on FP or INSUFFICIENT_DATA
 10. Code-supplied rollbacks
 11. TEST-NET range is never evidence
@@ -515,3 +516,5 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `98c4a4a` — trace-logging: update PROGRESS.md (follow-up red/green hashes)
 - `9b66b7a` — prefetch: red — code pre-fetch before the ReAct loop; ALERT_010 makes 0 model calls
 - `897d966` — prefetch: green — code pre-fetch (profile, sign-ins, audits @168) before the ReAct loop
+- `3f0f15f` — prefetch: update PROGRESS.md (green hash, Dream Run items 5-6 done)
+- `3d64faa` — analyst-question: red — trigger-based question templates, model_verdict/model_confidence display, ask_user trigger

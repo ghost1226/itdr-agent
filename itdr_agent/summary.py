@@ -231,6 +231,30 @@ def incident_note(alert: dict[str, Any], result: Any) -> str:
     )
 
 
+def verdict_line(report: Any) -> str:
+    """The verdict box's first line.
+
+    When the thin-evidence guard flipped the verdict, show what the model
+    said and why it changed, so it never reads as "INSUFFICIENT_DATA 0.92".
+    """
+    model_verdict = getattr(report, "model_verdict", None)
+    if model_verdict:
+        confidence = getattr(report, "model_confidence", None)
+        said = (
+            f"{model_verdict} ({confidence:.2f})"
+            if confidence is not None
+            else model_verdict
+        )
+        sign_ins = getattr(report, "baseline_sign_ins", None)
+        reason = (
+            f"only {_plural(sign_ins, 'sign-in')} in the last 7 days"
+            if sign_ins is not None
+            else "thin evidence"
+        )
+        return f"Model said {said}. Changed to {_verdict(report)} because {reason}."
+    return f"Verdict: {_verdict(report)}    Confidence: {report.confidence:.2f}"
+
+
 def report_summary_lines(report: Any, dossier: Any) -> list[str]:
     """Verdict / confidence / narrative / MITRE evidence, shared by CLI + GUI.
 
@@ -241,7 +265,7 @@ def report_summary_lines(report: Any, dossier: Any) -> list[str]:
     evidence = getattr(dossier, "mitre_attack_evidence", {}) or {}
     techniques = report.mitre_techniques_observed or []
     lines = [
-        f"Verdict: {report.verdict.value}    Confidence: {report.confidence:.2f}",
+        verdict_line(report),
         "Narrative:",
         report.narrative,
         "MITRE ATT&CK techniques:",

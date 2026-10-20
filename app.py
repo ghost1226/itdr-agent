@@ -42,6 +42,7 @@ from itdr_agent.summary import (  # noqa: E402
     short_summary,
     stage,
     ticket_lines,
+    verdict_line,
     what,
     what_happened,
 )
@@ -235,10 +236,7 @@ def _report_summary(run: GuiRun) -> None:
     if report is None:
         return
     with st.container(border=True):
-        st.markdown(
-            f"**Verdict: {report.verdict.value}**  ·  confidence "
-            f"{report.confidence:.2f}"
-        )
+        st.markdown(f"**{verdict_line(report)}**")
         st.text(report.narrative)
         evidence = dossier.mitre_attack_evidence if dossier is not None else {}
         techniques = report.mitre_techniques_observed or []
