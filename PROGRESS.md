@@ -7,7 +7,7 @@
 ## State as of 2026-10-20
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
-- **What's next:** the **ITDR Dream Run 1** fixes, starting with no containment on FP or INSUFFICIENT_DATA (item 9).
+- **What's next:** the **ITDR Dream Run 1** fixes, next is code-supplied rollbacks (item 10).
 - **Newest commit when this block was written:** `b0eabad` (this diary update is the commit that carries the block).
 
 ## What's Done
@@ -199,6 +199,7 @@
 - ✅ Trace follow-up (2026-10-20, before push): the `run` line now carries a `commit` field (git short hash, `+dirty` when tracked files differ from HEAD) and `mode` stays plain; the trace is written on failed runs too (try/finally) with an `error` field (exception class); a tool that raises records `"error": <exception class>` instead of rows 0; `mode` defaults to `unknown`, not `live`. Red `24037a4`, green `bebb40d`; 4 net new tests (15 in `tests/test_trace.py`).
 - ✅ Code pre-fetch (2026-10-20, Dream Run 1 items 5-6): `Investigator.investigate()` now calls `get_user_profile`, `get_sign_in_history` and `get_directory_audits` (hours = `BASELINE_HOURS` = 168) in code before the ReAct loop, merges them into the dossier, and feeds them to the model as wrapped untrusted tool results; the trace records them like any tool call, and they do not count toward `MAX_TOOL_CALLS` (the model still gets its own 8 and may re-call a tool with a different window). A missing profile or zero sign-ins returns the dossier with zero model calls (ALERT_010); a `SimulatedGraphError` still retries once per pre-fetch. Red `9b66b7a`, green `897d966`.
 - ✅ Analyst question by trigger (2026-10-20, Dream Run 1 items 7-8): `AdjudicatorOutput` gains code-only `model_verdict`/`model_confidence`, set by `apply_thin_evidence_guard` when it flips a FALSE_POSITIVE; the analyst question is built by code from a trigger — `thin_evidence` ("<upn> has only N sign-ins in the last 7 days. Is a sign-in from <city>, <country> on <date> normal for this user?"), `new_country` ("Is <upn> traveling in <country>, or expected to sign in from there?"), else the verdict and confidence + "What context would help?" — never by the LLM; the `ask_user` audit line records the `trigger`; the verdict box and CLI show "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA because only 2 sign-ins in the last 7 days." instead of a bare "INSUFFICIENT_DATA 0.92". Red `3d64faa`, green `8866e41`; 6 new tests (`tests/test_analyst_question.py`).
+- ✅ No containment on benign/unknown verdicts (2026-10-20, Dream Run 1 item 9; built by Jessica): `apply_no_containment_guard` runs after the thin-evidence guard and moves every containment step on a FALSE_POSITIVE or INSUFFICIENT_DATA verdict into recommended actions ("Optional, analyst's call: <step> (undo: <rollback>)"), sets code-only `moved_containment_steps`, adds an audit note, and the orchestrator logs a `containment_moved` audit line. Nothing reaches approve/edit/reject on those verdicts. Red `c90e377` (5 failed, 1 passed) → green `52713c3`; full suite **428 passed**.
 
 ## Microsoft Graph Schema Sources
 
@@ -257,7 +258,7 @@ regenerate them from a seed via `data_generator.write_fixtures(tmp_path, seed=..
 6. DONE: mandatory pre-fetch (`9b66b7a`)
 7. DONE: thin-evidence confidence kept separate (`3d64faa`)
 8. DONE: targeted analyst question (`3d64faa`)
-9. No containment on FP or INSUFFICIENT_DATA
+9. DONE: no containment on FP or INSUFFICIENT_DATA (`c90e377`, `52713c3`)
 10. Code-supplied rollbacks
 11. TEST-NET range is never evidence
 
@@ -519,3 +520,6 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `3f0f15f` — prefetch: update PROGRESS.md (green hash, Dream Run items 5-6 done)
 - `3d64faa` — analyst-question: red — trigger-based question templates, model_verdict/model_confidence display, ask_user trigger
 - `8866e41` — analyst-question: green — trigger-based question, model_verdict/model_confidence, ask_user trigger, 'Model said … Changed to …' display
+- `b85c569` — analyst-question: update PROGRESS.md (green hash, Dream Run items 7-8 done)
+- `c90e377` — no-containment: red — FALSE_POSITIVE/INSUFFICIENT_DATA steps move to recommended actions
+- `52713c3` — no-containment: green — steps move to recommended actions, containment_moved audit line
