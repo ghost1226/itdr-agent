@@ -9,6 +9,8 @@ policy lives in code, never in the model's promise:
     becomes ``INSUFFICIENT_DATA`` unless an analyst answered (problem #14);
     the guard counts the user's last 7 days itself, not the model's window
     (problem #34);
+  * a FALSE_POSITIVE or INSUFFICIENT_DATA verdict carries no containment
+    steps: code moves them to recommended actions (Dream Run 1 item 4);
   * every MITRE technique in the report must appear in the dossier's
     ``mitre_attack_evidence`` — anything else is rejected, not trusted;
   * the dossier is serialized with ``<``/``>`` escaped inside
@@ -145,6 +147,16 @@ THIN_EVIDENCE_NOTE = (
     "Thin-evidence guard: the model said FALSE_POSITIVE, but only {sign_ins} "
     "sign-in(s) and no directory audits were found, too little history to show "
     "the activity is normal for this user. Verdict set to INSUFFICIENT_DATA."
+)
+
+# Dream Run 1 item 4: about 9-10 runs proposed containment on a FALSE_POSITIVE
+# or INSUFFICIENT_DATA verdict (a password reset for the benign traveler).
+# Containment is for COMPROMISED and SUSPICIOUS only.
+NO_CONTAINMENT_VERDICTS = {Verdict.FALSE_POSITIVE, Verdict.INSUFFICIENT_DATA}
+MOVED_STEP_ACTION = "Optional, analyst's call: {step} (undo: {rollback})"
+NO_CONTAINMENT_NOTE = (
+    "No-containment guard: {count} containment step(s) moved to recommended "
+    "actions because the verdict is {verdict}."
 )
 
 ACTION_CLAIM_NOTE = (
@@ -288,6 +300,22 @@ def apply_thin_evidence_guard(
     return report
 
 
+def apply_no_containment_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
+    """Move containment steps off a benign/unknown verdict; set by code only."""
+    if report.verdict not in NO_CONTAINMENT_VERDICTS or not report.containment_steps:
+        return report
+    moved = [
+        MOVED_STEP_ACTION.format(step=s.step, rollback=s.rollback)
+        for s in report.containment_steps
+    ]
+    report.recommended_actions = [*report.recommended_actions, *moved]
+    report.containment_steps = []
+    report.moved_containment_steps = len(moved)
+    note = NO_CONTAINMENT_NOTE.format(count=len(moved), verdict=report.verdict.value)
+    report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+    return report
+
+
 def is_unsafe_rollback(text: str) -> bool:
     """True if a rollback would restore a credential or MFA setup."""
     return any(p.search(text) for p in _UNSAFE_ROLLBACK_PATTERNS)
@@ -364,6 +392,7 @@ class Adjudicator:
             self.baseline(dossier.user_principal_name) if self.baseline else None
         )
         report = apply_thin_evidence_guard(report, dossier, baseline)
+        report = apply_no_containment_guard(report)
         report = apply_action_claim_guard(report)
         report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)

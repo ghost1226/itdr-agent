@@ -97,6 +97,9 @@ class AdjudicatorOutput(BaseModel):
     # sees "Model said FALSE_POSITIVE (0.92). Changed to INSUFFICIENT_DATA".
     model_verdict: str | None = None
     model_confidence: float | None = None
+    # Set by code (adjudicator.apply_no_containment_guard), never by the model:
+    # containment steps moved to recommended actions on a benign/unknown verdict.
+    moved_containment_steps: int = 0
 
 
 CONFIDENCE_THRESHOLD = 0.7

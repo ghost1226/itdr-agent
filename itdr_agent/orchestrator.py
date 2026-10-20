@@ -378,6 +378,17 @@ class Orchestrator:
                     ),
                 },
             )
+        if report.moved_containment_steps:
+            self._append(
+                run_id,
+                {
+                    "event": "containment_moved",
+                    "timestamp": _now(),
+                    "alert_id": dossier.alert_id,
+                    "verdict": report.verdict.value,
+                    "steps": report.moved_containment_steps,
+                },
+            )
         if report.unsafe_rollbacks:
             self._append(
                 run_id,
