@@ -115,3 +115,30 @@ def test_standard_rollback_is_logged_and_the_analyst_sees_no_warning(tmp_path):
     assert line["rollback"] == adj.STANDARD_ROLLBACKS["password_reset"]
     assert line["unsafe_rollback"] is False
     assert result.report.unsafe_rollbacks == []
+
+
+# --- Review 2026-10-21 finding 8: ordinary negations the 3-word window missed
+
+
+@pytest.mark.parametrize(
+    "rollback",
+    [
+        "Do not, under any circumstances, restore the old password.",
+        "Restore access but never the previous password",
+        "Never, ever restore the previous MFA configuration; re-register instead.",
+    ],
+)
+def test_negation_anywhere_in_the_clause_is_safe(rollback):
+    assert not adj.is_unsafe_rollback(rollback), rollback
+
+
+@pytest.mark.parametrize(
+    "rollback",
+    [
+        "Without verifying, restore the old password",
+        "Do not lock the user out; restore the old password",
+        "Not sure why, but restore the previous password anyway.",
+    ],
+)
+def test_these_stay_unsafe(rollback):
+    assert adj.is_unsafe_rollback(rollback), rollback

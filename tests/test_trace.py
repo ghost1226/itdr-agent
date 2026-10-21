@@ -381,3 +381,41 @@ def test_trace_records_per_request_tokens_from_the_meter(tmp_path):
     ]
     assert adjudication[0]["tokens_in"] == 100
     assert adjudication[0]["tokens_out"] == 10
+
+
+# --- Review 2026-10-21 finding 4: the guard's baseline calls are visible -----
+
+
+def test_run_line_counts_prefetches_and_baseline_calls(tmp_path):
+    orch, audit = make_orchestrator(tmp_path, mode="mock")
+    orch.run(ALERT, run_id="r-counts")
+    run = next(e for e in run_entries(tmp_path / "audit-mock.jsonl") if e["event"] == "run")
+    assert run["tool_calls"] == 2          # the model's calls
+    assert run["prefetch_calls"] == 3      # code, before the model
+    assert run["baseline_calls"] == 2      # the thin-evidence guard's own lookups
+
+
+def test_trace_records_the_baseline_lookups(tmp_path):
+    orch, _audit = make_orchestrator(tmp_path, mode="mock")
+    orch.run(ALERT, run_id="r-baseline")
+    payload = json.loads((tmp_path / "runs" / "r-baseline.json").read_text())
+    names = [c["name"] for c in payload["tool_calls"]]
+    assert names[-2:] == ["baseline:get_sign_in_history", "baseline:get_directory_audits"]
+    for call in payload["tool_calls"][-2:]:
+        assert call["arguments"] == {"upn": ALICE, "hours": 168}
+        assert isinstance(call["rows"], int)
+
+
+def test_baseline_off_means_zero_baseline_calls(tmp_path):
+    orch = Orchestrator(
+        make_investigator(),
+        Adjudicator(CompleteLLM([_report()]), baseline=None),
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        mode="mock",
+        dirty=False,
+        model="test/model",
+    )
+    orch.run(ALERT, run_id="r-nobase")
+    run = next(e for e in run_entries(tmp_path / "audit-mock.jsonl") if e["event"] == "run")
+    assert run["baseline_calls"] == 0

@@ -932,3 +932,33 @@ def test_investigator_without_deadline_runs_normally():
     assert inv.deadline is None
     dossier = inv.investigate({"id": "ALERT_X", "userPrincipalName": ERIN})
     assert dossier.alert_id == "ALERT_X"
+
+
+# --- Review 2026-10-21 finding 4: the pre-fetches are counted on their own ---
+
+
+def test_prefetch_calls_are_counted_separately_from_the_models_calls():
+    from itdr_agent.investigator import Investigator
+
+    inv = Investigator(ScriptedLLM(_full_script(ALICE)))
+    inv.investigate(_alert("impossible_travel"))
+    assert inv.prefetch_calls == 3  # profile, sign-ins, audits by code
+    assert inv.tool_calls_made == 5  # the model's own calls, unchanged
+
+
+def test_prefetch_retry_is_counted_too():
+    from itdr_agent.investigator import Investigator
+    from itdr_agent.tools import call_tool
+
+    state = {"failed": False}
+
+    def flaky(name, arguments):
+        if name == "get_directory_audits" and not state["failed"]:
+            state["failed"] = True
+            raise SimulatedGraphError(500)
+        return call_tool(name, arguments)
+
+    inv = Investigator(ScriptedLLM([{"action": "final"}]), tool_executor=flaky)
+    inv.investigate(_alert("impossible_travel"))
+    assert inv.prefetch_calls == 4  # 3 pre-fetches + 1 retry
+    assert inv.tool_calls_made == 0
