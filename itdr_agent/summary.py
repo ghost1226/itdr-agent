@@ -554,4 +554,4 @@ def evidence_detail(dossier: Any, technique: str) -> list[str]:
             ] if p))
         else:
             lines.append(f"record {rid} (not in the dossier)")
-    return lines
+    return sorted(lines)  # the stamp comes first, so this is time order

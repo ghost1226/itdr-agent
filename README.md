@@ -84,7 +84,7 @@ pip install -r requirements-gui.txt
 python -m streamlit run app.py
 ```
 
-It opens at http://localhost:8501. Pick a mode in the sidebar:
+It opens at http://localhost:8501 as **Countersign: Layer Zero** (the brand and screens from the approved design: dark Night / Panel palette, Signal amber for the one primary action, IBM Plex type). The queue lists every alert with its severity and live status; an alert's page shows the alert line, a code-built headline, four cards (Verdict, Technique, Blast radius, Status), the evidence tree (user → baseline → burst → each sign-in, the rows behind a proved technique lit) with a replay scrubber, the agent's activity feed in plain words, the containment steps waiting for your countersign, and, once closed, the incident note, the narrative, each technique's evidence in readable lines, and the dossier and audit trail behind expanders. Pick a mode in the sidebar:
 
 - **Offline demo:** no key, no model, no requests used. Scripted tool calls and a canned verdict, for trying the screens.
 - **Live:** the real model with the key in your `.env` (never shown on the page). Each alert uses about 6 to 8 of a free account's 50 daily requests.
