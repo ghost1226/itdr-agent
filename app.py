@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -36,7 +37,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from itdr_agent import config  # noqa: E402
 from itdr_agent.adjudicator import DEFAULT_MODEL, Adjudicator  # noqa: E402
 from itdr_agent.fixture_store import get_store  # noqa: E402
-from itdr_agent.gui_run import GuiRun  # noqa: E402
+from itdr_agent.gui_run import BatchRunner, GuiRun  # noqa: E402
 from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E402
 from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
@@ -63,6 +64,11 @@ STATUS_WORDS = {
     "review": "Waiting on you",
     "error": "Closed: ERROR",
 }
+# Free-tier arithmetic for the cost line: one live run is about 6-10 requests
+# of a free account's 50 a day (README, "Run the GUI").
+REQUESTS_PER_RUN = (6, 10)
+FREE_DAILY_CAP = 50
+BATCH_POLL_SECONDS = 2.0
 
 
 def _audit_path() -> Path:
@@ -169,6 +175,60 @@ def _status_of(run: GuiRun) -> str:
     if run.status == "done":
         return f"Closed: {run.result.report.verdict.value}"
     return STATUS_WORDS.get(run.status, run.status)
+
+
+def _batch() -> BatchRunner | None:
+    return st.session_state.get("batch")
+
+
+def _batch_running() -> bool:
+    batch = _batch()
+    return batch is not None and batch.status == "running"
+
+
+def _start_batch(alert_ids: list[str]) -> None:
+    """Queue the alerts (status "Queued") and run them one at a time."""
+    if not alert_ids or _batch_running():
+        return
+    mode = st.session_state.get("mode", OFFLINE)
+    model = os.getenv("EVAL_MODEL", DEFAULT_MODEL)
+    if mode == LIVE and not config.OPENROUTER_API_KEY:
+        st.session_state["flash"] = "OPENROUTER_API_KEY is not set. Add it to .env."
+        return
+    alerts = _alerts()
+    runs = []
+    for alert_id in alert_ids:
+        run = GuiRun(_build_for(alert_id, mode, model), alerts[alert_id])
+        _runs()[alert_id] = run
+        runs.append(run)
+    batch = BatchRunner(runs)
+    st.session_state["batch"] = batch
+    st.session_state.pop("flash", None)
+    batch.start()
+
+
+def _run_selected_clicked() -> None:
+    _start_batch(_selected_ids())
+
+
+def _run_all_clicked() -> None:
+    _start_batch(list(st.session_state.get("queue_rows") or []))
+
+
+def _cost_line(count: int, mode: str) -> None:
+    """What a batch will spend, shown before it starts."""
+    if mode != LIVE:
+        st.caption(f"Offline demo: {count} alert{'s' if count != 1 else ''}, no requests used.")
+        return
+    low, high = REQUESTS_PER_RUN[0] * count, REQUESTS_PER_RUN[1] * count
+    text = (
+        f"{count} alert{'s' if count != 1 else ''} ≈ {low}-{high} requests of a "
+        f"free account's {FREE_DAILY_CAP} a day."
+    )
+    if high > FREE_DAILY_CAP:
+        st.warning(f"{text} That may not fit today's daily cap; runs stop at 429 and can be re-run tomorrow.")
+    else:
+        st.caption(text)
 
 
 def _guarded(action) -> None:
@@ -426,20 +486,47 @@ def _home() -> None:
         selection_mode="single-row",
         hide_index=True,
     )
-    # Remember the selection as drawn: a button callback runs before the
-    # next draw, and the table's own selection state may be gone by then.
+    # Remember the selection and the rows as drawn: a button callback runs
+    # before the next draw, and the table's own selection may be gone by then.
     selected = [rows[i]["Alert ID"] for i in event.selection.rows]
     st.session_state["queue_selected"] = selected
+    st.session_state["queue_rows"] = [row["Alert ID"] for row in rows]
     if len(selected) == 1:
         # Set the sidebar alert before _sidebar() creates the selectbox
         # widget; Streamlit forbids changing a widget key after creation.
         st.session_state["alert_id"] = selected[0]
-    st.button(
+    mode = st.session_state.get("mode", OFFLINE)
+    busy = _batch_running()
+    _cost_line(len(selected) if selected else len(rows), mode)
+    open_col, sel_col, all_col = st.columns(3)
+    open_col.button(
         "Open selected" if len(selected) == 1 else "Open selected (pick one row)",
         key="open_selected",
         disabled=len(selected) != 1,
         on_click=_open_clicked,
     )
+    sel_col.button(
+        f"Run selected ({len(selected)})",
+        key="run_selected",
+        disabled=not selected or busy,
+        on_click=_run_selected_clicked,
+    )
+    all_col.button(
+        f"Run all ({len(rows)})",
+        key="run_all",
+        type="primary",
+        disabled=not rows or busy,
+        on_click=_run_all_clicked,
+    )
+    if busy:
+        batch = _batch()
+        now = f", now {batch.current}" if batch.current else ""
+        st.caption(
+            f"Batch running: {batch.completed} of {batch.total} started and "
+            f"parked or finished{now}. One alert investigates at a time."
+        )
+        time.sleep(BATCH_POLL_SECONDS)
+        st.rerun()
 
 
 def _selected_ids() -> list[str]:

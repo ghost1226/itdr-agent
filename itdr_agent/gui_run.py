@@ -10,6 +10,12 @@ module only swaps the CLI's ``input()`` for a hand-off between two threads.
 Every tool call goes through a recording executor so the page can show what
 the Investigator looked at, including failed attempts.
 
+``BatchRunner`` runs several ``GuiRun``s one at a time: it starts the next
+run as soon as the current one leaves ``running`` (parked on a question or a
+containment step, finished, or failed). Only one alert is ever investigating,
+so a batch never bursts the free tier, while several runs can wait on the
+analyst at once.
+
 Kept free of any web framework so it is testable offline.
 """
 
@@ -211,5 +217,48 @@ class GuiRun:
             return
         with self._cond:
             self.result = result
+            self.status = "done"
+            self._cond.notify_all()
+
+
+class BatchRunner:
+    """Run a list of ``GuiRun``s one at a time on a worker thread."""
+
+    def __init__(self, runs: list[GuiRun]) -> None:
+        self.runs = list(runs)
+        self.total = len(self.runs)
+        self.completed = 0
+        self.current: str | None = None
+        self.order: list[str] = []
+        self.status = "idle"  # idle | running | done
+        self._cond = threading.Condition()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        with self._cond:
+            if self._thread is not None:
+                raise RuntimeError("this batch has already started")
+            self.status = "running"
+            self._thread = threading.Thread(target=self._work, daemon=True)
+        self._thread.start()
+
+    def wait(self, timeout: float | None = None) -> str:
+        """Block until every run has started and left ``running``."""
+        with self._cond:
+            self._cond.wait_for(lambda: self.status != "running", timeout)
+            return self.status
+
+    def _work(self) -> None:
+        for run in self.runs:
+            alert_id = run.alert.get("id", "")
+            with self._cond:
+                self.current = alert_id
+                self.order.append(alert_id)
+            run.start()
+            run.wait(None)  # parked on the analyst, done, or failed
+            with self._cond:
+                self.completed += 1
+                self.current = None
+        with self._cond:
             self.status = "done"
             self._cond.notify_all()
