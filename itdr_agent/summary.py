@@ -11,6 +11,8 @@ be unit-tested and reused by the CLI and the GUI.
 
 from __future__ import annotations
 
+from collections import Counter
+from datetime import datetime, timedelta
 from typing import Any
 
 # riskEventTypes_v2 values (Graph beta) in plain words.
@@ -355,3 +357,108 @@ def blast_radius(dossier: Any) -> tuple[str, str]:
         parts.append(f"{_plural(len(apps), 'app consent')}: {', '.join(apps)}")
     label = "Roles" if roles else "Apps" if apps else "Account"
     return (label, "; ".join(parts) if parts else "No role, app or consent changes found")
+
+
+# --- GUI rebuild checkpoint 3: the evidence tree ----------------------------
+
+BURST_HOURS = 1  # a sign-in within an hour either side of the alert is "burst"
+
+
+def _ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _device_label(event: dict[str, Any]) -> str:
+    device = event.get("deviceDetail") or {}
+    name = device.get("displayName") or "unknown device"
+    os_name = device.get("operatingSystem")
+    return f"{name} ({os_name})" if os_name else name
+
+
+def _outcome(event: dict[str, Any]) -> str:
+    status = event.get("status") or {}
+    code = status.get("errorCode", 0)
+    if code == 0:
+        return "Success"
+    if "MFA" in (status.get("failureReason") or ""):
+        return "MFA denied"
+    return f"Failed: {status.get('failureReason') or 'unknown reason'}"
+
+
+def _place_of(events: list[dict[str, Any]]) -> str:
+    places = Counter(_place(e) for e in events if e.get("location"))
+    return places.most_common(1)[0][0] if places else "unknown place"
+
+
+def _span(events: list[dict[str, Any]], key: str) -> str:
+    stamps = sorted(_ts(e[key]) for e in events if e.get(key))
+    if not stamps:
+        return ""
+    first, last = stamps[0], stamps[-1]
+    if first.date() == last.date():
+        return f"{first:%b %-d}, {first:%H:%M} to {last:%H:%M}"
+    return f"{first:%b %-d} to {last:%b %-d}"
+
+
+def evidence_tree(alert: dict[str, Any], dossier: Any) -> dict[str, Any]:
+    """The evidence as a tree the page draws: user, baseline, burst, rows, audits.
+
+    Code only, from the dossier; never the IP; the rows behind a technique in
+    ``mitre_attack_evidence`` carry its id so the page can light them.
+    """
+    upn = alert.get("userPrincipalName", "")
+    profile = getattr(dossier, "user_profile", None) or {}
+    title = " · ".join(p for p in (profile.get("jobTitle"), profile.get("department")) if p)
+    sign_ins = sorted(
+        getattr(dossier, "sign_in_history", None) or [], key=lambda e: e["createdDateTime"]
+    )
+    audits = getattr(dossier, "directory_audits", None) or []
+    evidence = getattr(dossier, "mitre_attack_evidence", None) or {}
+    lit = {rid: technique for technique, ids in evidence.items() for rid in ids}
+
+    alert_time = _ts(alert["createdDateTime"]) if alert.get("createdDateTime") else None
+    window = timedelta(hours=BURST_HOURS)
+    burst = [
+        e for e in sign_ins
+        if alert_time is not None and abs(_ts(e["createdDateTime"]) - alert_time) <= window
+    ]
+    baseline = [e for e in sign_ins if e not in burst]
+
+    rows = [
+        {
+            "id": e.get("id", ""),
+            "ts": e["createdDateTime"],
+            "time": f"{_ts(e['createdDateTime']):%H:%M}",
+            "app": e.get("appDisplayName") or "",
+            "device": _device_label(e),
+            "outcome": _outcome(e),
+            "technique": lit.get(e.get("id", "")),
+        }
+        for e in burst
+    ]
+    label, detail = blast_radius(dossier)
+    audit_detail = (
+        detail if label != "Account" else "no roles, apps or consents touched"
+    )
+    times = sorted(
+        [e["createdDateTime"] for e in sign_ins] + [a["activityDateTime"] for a in audits]
+    )
+    return {
+        "user": {"upn": upn, "title": title},
+        "baseline": {
+            "count": len(baseline),
+            "place": _place_of(baseline) if baseline else "",
+            "devices": sorted({_device_label(e) for e in baseline}),
+            "apps": sorted({e.get("appDisplayName") or "" for e in baseline} - {""}),
+            "span": _span(baseline, "createdDateTime"),
+        },
+        "burst": {
+            "count": len(burst),
+            "place": _place_of(burst) if burst else "",
+            "device_count": len({(e.get("deviceDetail") or {}).get("deviceId") for e in burst}),
+            "span": _span(burst, "createdDateTime"),
+        },
+        "rows": rows,
+        "audits": {"count": len(audits), "detail": audit_detail},
+        "times": times,
+    }

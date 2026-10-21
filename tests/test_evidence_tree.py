@@ -2,7 +2,7 @@
 
 USER -> BASELINE (sign-ins outside the burst) -> BURST (sign-ins within an
 hour either side of the alert) -> one row per burst sign-in, the rows behind
-a proved technique lit with its id -> AUDITS. Never an IP. Offline only.
+a proved technique lit with its id (only real evidence rows) -> AUDITS. Never an IP. Offline only.
 """
 
 from __future__ import annotations
@@ -43,7 +43,9 @@ def test_mfa_fatigue_tree_has_the_burst_and_the_lit_success_row():
     rows = tree["rows"]
     assert len(rows) == 5
     assert [r["outcome"] for r in rows] == ["MFA denied"] * 4 + ["Success"]
-    assert all(r["technique"] == "T1621" for r in rows)  # all 5 are T1621 evidence
+    # The four denials are the T1621 evidence; the success that follows is not
+    # evidence on its own (derive_indicators), so it stays unlit.
+    assert [r["technique"] for r in rows] == ["T1621"] * 4 + [None]
     assert rows[0]["time"] == "09:00" and rows[-1]["time"] == "09:08"
     assert "Microsoft Teams" in rows[0]["app"] or rows[0]["app"]
     assert tree["audits"]["count"] == 0

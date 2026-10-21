@@ -51,6 +51,7 @@ from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
 from itdr_agent.summary import (  # noqa: E402
     alert_line,
     blast_radius,
+    evidence_tree,
     incident_note,
     severity,
     short_summary,
@@ -496,6 +497,25 @@ def _brand_css() -> None:
         f".cs-card .lbl {{ font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.12em; color:{MUTED}; }}"
         ".cs-card .val { font-size:26px; font-weight:700; line-height:1.2; }"
         f".cs-card .det {{ font-size:14px; color:{MUTED}; }}"
+        f".cs-panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:12px; overflow:hidden; margin:0 0 14px; }}"
+        f".cs-panel .ph {{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; border-bottom:1px solid {LINE}; font-size:16px; font-weight:600; }}"
+        f".cs-panel .ph small {{ font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:400; color:{MUTED}; }}"
+        ".cs-tree { padding:12px 18px 16px; display:flex; flex-direction:column; gap:4px; font-size:14px; }"
+        ".cs-node { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; }"
+        ".cs-node.user { background:#1A2230; }"
+        f".cs-node .muted {{ color:{MUTED}; }}"
+        f".cs-tag {{ font-family:'IBM Plex Mono', monospace; font-size:12px; padding:2px 6px; border-radius:4px; background:#232C38; color:{MUTED}; }}"
+        f".cs-tag.base {{ background:#13253A; color:{BENIGN}; }}"
+        ".cs-tag.burst { background:#3A1E14; color:#FF9A6E; }"
+        ".cs-branch { display:flex; gap:10px; padding-left:18px; }"
+        ".cs-rail { width:2px; background:#2A3442; border-radius:1px; }"
+        ".cs-rail.hot { background:#4A2A1E; }"
+        ".cs-kids { flex:1; display:flex; flex-direction:column; gap:3px; padding:4px 0; min-width:0; }"
+        f".cs-row {{ display:grid; grid-template-columns:64px minmax(0,1fr) auto; gap:10px; padding:6px 10px; border-radius:6px; font-family:'IBM Plex Mono', monospace; font-size:13px; }}"
+        f".cs-row .t {{ color:{MUTED}; }} .cs-row .o {{ color:#FF9A6E; }} .cs-row .o.ok {{ color:{BENIGN}; }}"
+        f".cs-row.lit {{ background:#3A1E14; border:1px solid {THREAT}; padding:7px 9px; }}"
+        f".cs-row.lit .t {{ color:#FFB394; }} .cs-row.lit span:nth-child(2) {{ color:#FFE3D6; }} .cs-row.lit .o {{ color:{THREAT}; font-weight:600; }}"
+        ".cs-row.dim, .cs-node.dim { opacity:0.35; }"
         "</style>",
         unsafe_allow_html=True,
     )
@@ -848,6 +868,76 @@ def _alert_header(run: GuiRun) -> None:
     )
 
 
+def _evidence_tree(run: GuiRun) -> None:
+    """USER -> BASELINE -> BURST rows -> AUDITS, from the dossier, with a scrubber."""
+    _report, dossier = _report_and_dossier(run)
+    if dossier is None:
+        return
+    tree = evidence_tree(run.alert, dossier)
+    e = html.escape
+    times = tree["times"]
+    cutoff = times[-1] if times else ""
+    if len(times) > 1:
+        labels = [f"{_fmt_stamp(t)}" for t in times]
+        picked = st.select_slider(
+            "Replay to", options=list(range(len(times))), value=len(times) - 1,
+            format_func=lambda i: labels[i], key="replay",
+        )
+        cutoff = times[picked]
+    elif times:
+        st.select_slider("Replay to", options=[0], value=0,
+                         format_func=lambda i: _fmt_stamp(times[0]), key="replay")
+
+    def dim(ts: str) -> str:
+        return " dim" if ts > cutoff else ""
+
+    user, base, burst, audits = tree["user"], tree["baseline"], tree["burst"], tree["audits"]
+    base_desc = (
+        f"{_plural(base['count'], 'sign-in')} · {e(base['place'])} · "
+        f"{e(', '.join(base['devices'][:2]) or 'no device')}"
+    )
+    base_more = f"{e(', '.join(base['apps'][:3]))} · {e(base['span'])}"
+    burst_desc = (
+        f"{_plural(burst['count'], 'sign-in')} · {e(burst['place'])} · "
+        f"{_plural(burst['device_count'], 'device')}"
+    )
+    rows = "".join(
+        f'<div class="cs-row{" lit" if r["technique"] else ""}{dim(r["ts"])}">'
+        f'<span class="t">{e(r["time"])}</span><span>{e(r["app"])} · {e(r["device"])}</span>'
+        f'<span class="o{" ok" if r["outcome"] == "Success" and not r["technique"] else ""}">'
+        f'{e(r["outcome"]).upper() if r["technique"] else e(r["outcome"])}'
+        f'{" · " + e(r["technique"]) if r["technique"] else ""}</span></div>'
+        for r in tree["rows"]
+    ) or '<div class="cs-row"><span class="t">—</span><span class="muted">no sign-ins within an hour of the alert</span><span></span></div>'
+    st.markdown(
+        '<div class="cs-panel"><div class="ph"><span>Evidence tree</span>'
+        f"<small>burst = within {BURST_HOURS_LABEL} of the alert</small></div>"
+        '<div class="cs-tree">'
+        f'<div class="cs-node user"><span class="cs-tag">USER</span><strong>{e(user["upn"])}</strong>'
+        f'<span class="muted">{e(user["title"])}</span></div>'
+        '<div class="cs-branch"><div class="cs-rail"></div><div class="cs-kids">'
+        f'<div class="cs-node"><span class="cs-tag base">BASELINE</span><span>{base_desc}</span><span class="muted">{base_more}</span></div>'
+        f'<div class="cs-node"><span class="cs-tag burst">BURST</span><span>{burst_desc}</span><span class="muted">{e(burst["span"])}</span></div>'
+        '<div class="cs-branch"><div class="cs-rail hot"></div><div class="cs-kids">'
+        f"{rows}</div></div>"
+        f'<div class="cs-node"><span class="cs-tag">AUDITS</span><span>{_plural(audits["count"], "directory change")} in 7 days</span>'
+        f'<span class="muted">{e(audits["detail"])}</span></div>'
+        "</div></div></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+BURST_HOURS_LABEL = "1 h"
+
+
+def _fmt_stamp(iso: str) -> str:
+    return iso.replace("T", " ")[5:16].replace("-", "/")
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def _card(label: str, value: str, detail: str, color: str = TEXT) -> str:
     return (
         f'<div class="cs-card"><span class="lbl">{html.escape(label)}</span>'
@@ -906,6 +996,7 @@ def _run_page(run: GuiRun) -> None:
     status = run.wait(POLL_SECONDS)  # first, so a finished run shows its summary
     _alert_header(run)
     _cards(run, status)
+    _evidence_tree(run)
     if _back_to_queue():
         # The run stays in session_state["runs"]; its thread keeps waiting.
         st.session_state.pop("open", None)
