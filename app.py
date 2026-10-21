@@ -1,4 +1,4 @@
-"""Local web GUI for the ITDR agent.
+"""Local web GUI for the ITDR agent (Countersign: Layer Zero).
 
 Run:  python -m streamlit run app.py   (needs requirements-gui.txt)
 
@@ -12,6 +12,10 @@ Two modes:
   answer key. No key, no model, no tokens. It shows how the screens work;
   it does not test the AI.
 - Live: the real OpenRouter model with your own key from .env (never shown).
+
+Runs live in ``st.session_state["runs"]`` keyed by alert id, so Back to queue
+leaves a run that waits on the analyst exactly where it is; the queue shows
+every run's live status and a row can be reopened.
 
 Anything the model wrote is shown with st.text, never rendered as markdown.
 """
@@ -47,10 +51,18 @@ from itdr_agent.summary import (  # noqa: E402
     what_happened,
 )
 
+APP_NAME = "Countersign: Layer Zero"
 OFFLINE = "Offline demo (no key, no model)"
 LIVE = "Live (OpenRouter, your own key)"
 POLL_SECONDS = 0.5
-WIDGET_PREFIXES = ("edited_step_", "reject_reason_", "answer_")
+WIDGET_PREFIXES = ("edited_step_", "edited_rollback_", "reject_reason_", "answer_")
+STATUS_WORDS = {
+    "idle": "Queued",
+    "running": "Running",
+    "question": "Waiting on you",
+    "review": "Waiting on you",
+    "error": "Closed: ERROR",
+}
 
 
 def _audit_path() -> Path:
@@ -117,22 +129,46 @@ def _live_builder(model: str, audit: Path):
 # --- callbacks (run before the page redraws) -------------------------------
 
 
-def _start(mode: str, model: str) -> None:
+def _clear_widgets() -> None:
+    """Per-step widget keys are shared across run pages; reset on a switch."""
     for key in list(st.session_state):
         if key.startswith(WIDGET_PREFIXES):
             del st.session_state[key]
     st.session_state.pop("flash", None)
+
+
+def _runs() -> dict[str, GuiRun]:
+    return st.session_state.setdefault("runs", {})
+
+
+def _build_for(alert_id: str, mode: str, model: str):
+    audit = _audit_path()
+    if mode == LIVE:
+        return _live_builder(model, audit)
+    return _offline_builder(alert_id, audit)
+
+
+def _open(alert_id: str) -> None:
+    _clear_widgets()
+    st.session_state["open"] = alert_id
+    st.session_state.pop("selected_alert", None)
+
+
+def _start(mode: str, model: str) -> None:
     alert_id = (
         st.session_state.get("selected_alert") or st.session_state["alert_id"]
     )
-    audit = _audit_path()
-    if mode == LIVE:
-        build = _live_builder(model, audit)
-    else:
-        build = _offline_builder(alert_id, audit)
-    run = GuiRun(build, _alerts()[alert_id])
-    st.session_state["run"] = run
+    run = GuiRun(_build_for(alert_id, mode, model), _alerts()[alert_id])
+    _runs()[alert_id] = run  # a new run for this alert replaces the old one
+    _open(alert_id)
     run.start()
+
+
+def _status_of(run: GuiRun) -> str:
+    """The queue's status word, derived from the live run, never cached."""
+    if run.status == "done":
+        return f"Closed: {run.result.report.verdict.value}"
+    return STATUS_WORDS.get(run.status, run.status)
 
 
 def _guarded(action) -> None:
@@ -176,7 +212,8 @@ def _skip_answer(run: GuiRun) -> None:
 
 
 def _sidebar() -> tuple[str, str, bool]:
-    st.sidebar.title("ITDR Agent")
+    st.sidebar.title(APP_NAME)
+    st.sidebar.caption("ITDR agent: investigate, decide, you approve.")
     mode = st.sidebar.radio("Mode", [OFFLINE, LIVE], key="mode")
     model = os.getenv("EVAL_MODEL", DEFAULT_MODEL)
     ready = True
@@ -346,20 +383,23 @@ def _home() -> None:
     """The incident queue: count, search, severity/status filters, table."""
     st.title("Identity incident queue")
     alerts = list(_alerts().values())
-    statuses = st.session_state.setdefault("statuses", {})
+    runs = _runs()
     search = st.text_input("Search by name, user, or ID", key="queue_search")
     severity_filter = st.multiselect(
         "Severity", ["High", "Medium", "Low", "None"], key="queue_severity"
     )
     status_filter = st.multiselect(
-        "Status", ["Not started", "Waiting on you", "Closed"], key="queue_status"
+        "Status",
+        ["Not started", "Queued", "Running", "Waiting on you", "Closed"],
+        key="queue_status",
     )
     rows: list[dict[str, str]] = []
     needle = (search or "").strip().lower()
     for alert in alerts:
         name = what(alert)
         sev = severity(alert)
-        run_status = statuses.get(alert["id"], "Not started")
+        run = runs.get(alert["id"])
+        run_status = _status_of(run) if run is not None else "Not started"
         haystack = f"{name} {alert['userPrincipalName']} {alert['id']}".lower()
         if needle and needle not in haystack:
             continue
@@ -386,23 +426,41 @@ def _home() -> None:
         selection_mode="single-row",
         hide_index=True,
     )
-    if event.selection.rows:
-        selected = rows[event.selection.rows[0]]["Alert ID"]
+    # Remember the selection as drawn: a button callback runs before the
+    # next draw, and the table's own selection state may be gone by then.
+    selected = [rows[i]["Alert ID"] for i in event.selection.rows]
+    st.session_state["queue_selected"] = selected
+    if len(selected) == 1:
         # Set the sidebar alert before _sidebar() creates the selectbox
         # widget; Streamlit forbids changing a widget key after creation.
-        st.session_state["selected_alert"] = selected
-        st.session_state["alert_id"] = selected
-        st.rerun()
+        st.session_state["alert_id"] = selected[0]
+    st.button(
+        "Open selected" if len(selected) == 1 else "Open selected (pick one row)",
+        key="open_selected",
+        disabled=len(selected) != 1,
+        on_click=_open_clicked,
+    )
 
 
-def _record_status(run: GuiRun, status: str) -> None:
-    statuses = st.session_state.setdefault("statuses", {})
-    if status in ("question", "review"):
-        statuses[run.alert["id"]] = "Waiting on you"
-    elif status == "done":
-        statuses[run.alert["id"]] = f"Closed: {run.result.report.verdict.value}"
-    elif status == "error":
-        statuses[run.alert["id"]] = "Closed: ERROR"
+def _selected_ids() -> list[str]:
+    """Alert ids selected in the queue table at its last draw."""
+    return list(st.session_state.get("queue_selected") or [])
+
+
+def _open_clicked() -> None:
+    selected = _selected_ids()
+    if len(selected) != 1:
+        return
+    _open_or_select(selected[0])
+
+
+def _open_or_select(alert_id: str) -> None:
+    """An existing run reopens where it is; otherwise show the start page."""
+    if alert_id in _runs():
+        _open(alert_id)
+    else:
+        st.session_state["selected_alert"] = alert_id
+        st.session_state.pop("open", None)
 
 
 def _back_to_queue() -> bool:
@@ -427,7 +485,8 @@ def _run_page(run: GuiRun) -> None:
     status = run.wait(POLL_SECONDS)  # first, so a finished run shows its summary
     _what_happened(run)
     if _back_to_queue():
-        st.session_state.pop("run", None)
+        # The run stays in session_state["runs"]; its thread keeps waiting.
+        st.session_state.pop("open", None)
         st.session_state.pop("selected_alert", None)
         st.rerun()
     if st.session_state.get("flash"):
@@ -442,7 +501,6 @@ def _run_page(run: GuiRun) -> None:
                     _tool_calls(run)
                 status = run.wait(POLL_SECONDS)
         st.rerun()  # once: draw the question, the step, or the report
-    _record_status(run, status)
     _tool_calls(run)
     if status == "question":
         _question(run)
@@ -463,8 +521,9 @@ def _selected_page(alert: dict) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="ITDR Agent", layout="wide")
-    run: GuiRun | None = st.session_state.get("run")
+    st.set_page_config(page_title="Countersign: Layer Zero", layout="wide")
+    open_id: str | None = st.session_state.get("open")
+    run: GuiRun | None = _runs().get(open_id) if open_id else None
     selected: str | None = st.session_state.get("selected_alert")
     on_home = run is None and selected is None
     if on_home:

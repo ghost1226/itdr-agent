@@ -300,11 +300,15 @@ def test_queue_status_filter_narrows_rows(audit):
     assert len(_queue(at)) == 0
 
 
-def test_selecting_a_row_opens_the_run_page(audit):
+def test_selecting_a_row_then_open_shows_the_run_page(audit):
     at = _app()
     at.session_state["queue"] = {
         "selection": {"rows": [2], "columns": [], "cells": []}
     }
+    at.run()
+    assert not at.exception, at.exception
+    assert not at.button(key="open_selected").disabled
+    at.button(key="open_selected").click()
     at.run()
     assert not at.exception, at.exception
     assert "ALERT_003" in _page_text(at)
@@ -317,6 +321,8 @@ def test_back_to_queue_returns_home(audit):
     at.session_state["queue"] = {
         "selection": {"rows": [0], "columns": [], "cells": []}
     }
+    at.run()
+    at.button(key="open_selected").click()
     at.run()
     at.button(key="back_to_queue").click()
     at.run()
