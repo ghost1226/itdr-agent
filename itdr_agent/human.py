@@ -15,6 +15,34 @@ from .summary import report_summary_lines
 
 CANCELLED_ANSWER = "no decision has been supplied"
 
+# The one question's options, shared by the orchestrator (which asks) and the
+# thin-evidence guard (which decides whether the answer counts as context).
+# Review 2026-10-21 finding 1: "I don't know" used to switch the guard off.
+ANALYST_OPTIONS = (
+    "The activity is expected/benign",
+    "The activity is suspicious/malicious",
+    "I don't know",
+)
+CONTEXT_CHOICE_INDEX = 0
+NO_CONTEXT_ANSWER = ANALYST_OPTIONS[2]
+
+
+def supplies_context(answer: Any) -> bool:
+    """True when an analyst answer gives the baseline the thin guard lacks.
+
+    Only "expected/benign" (the analyst knows this user's normal) or typed
+    context counts. "I don't know", "suspicious" and a cancel say nothing
+    about what is normal for the user, so the guard stays on.
+    """
+    if getattr(answer, "status", None) != "answered":
+        return False
+    text = (getattr(answer, "answer", "") or "").strip().lower()
+    if text == NO_CONTEXT_ANSWER.lower():
+        return False
+    if getattr(answer, "free_text", False):
+        return True
+    return getattr(answer, "choice_index", None) == CONTEXT_CHOICE_INDEX
+
 
 class ReviewAbortedError(RuntimeError, EOFError):
     """The analyst's input ended before a valid containment decision.

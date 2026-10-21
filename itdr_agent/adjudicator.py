@@ -32,6 +32,7 @@ from .schemas import (
     apply_confidence_guardrail,
 )
 from . import sim_api
+from .human import supplies_context
 from .tools import wrap_analyst_input, wrap_tool_output
 
 # The one default for the CLI, GUI, evaluation, and live scripts; override
@@ -367,9 +368,9 @@ def apply_thin_evidence_guard(
     sign_ins, audits = _evidence_counts(dossier, baseline)
     report.baseline_sign_ins = sign_ins if baseline is not None else None
     report.baseline_directory_audits = audits if baseline is not None else None
-    analyst_answered = any(
-        a.status == "answered" for a in dossier.analyst_context
-    )
+    # Only an answer that supplies context switches the guard off: "I don't
+    # know" and "suspicious" give no baseline (review 2026-10-21 finding 1).
+    analyst_answered = any(supplies_context(a) for a in dossier.analyst_context)
     if (
         report.verdict is Verdict.FALSE_POSITIVE
         and is_thin_evidence(dossier, baseline)

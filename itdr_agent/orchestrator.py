@@ -43,7 +43,7 @@ from .adjudicator import (
     find_unsafe_rollbacks,
     is_unsafe_rollback,
 )
-from .human import Reviewer
+from .human import ANALYST_OPTIONS, Reviewer
 from .investigator import InvestigationTimeoutError
 from .trace import RUNS_DIRNAME, RunTrace
 from .usage import TokenMeter
@@ -477,11 +477,7 @@ class Orchestrator:
             return report
         alert_id = alert.get("id", "")
         trigger, question = build_analyst_question(alert, dossier, report)
-        options = [
-            {"label": "The activity is expected/benign"},
-            {"label": "The activity is suspicious/malicious"},
-            {"label": "I don't know"},
-        ]
+        options = [{"label": label} for label in ANALYST_OPTIONS]
         asked_at = self.clock()
         result = self.reviewer.ask(question, options, True)
         self._deadline += self.clock() - asked_at  # analyst time doesn't count
