@@ -17,11 +17,17 @@ Runs live in ``st.session_state["runs"]`` keyed by alert id, so Back to queue
 leaves a run that waits on the analyst exactly where it is; the queue shows
 every run's live status and a row can be reopened.
 
+Voice: a mic button records a command, the local whisper.cpp server turns it
+into text, and ``itdr_agent.voice`` parses it in code (wake word "zero"). A
+typed command box takes the same path when the mic or the server is down.
+Approve / reject / edit are read back and wait for "zero yes" or the button.
+
 Anything the model wrote is shown with st.text, never rendered as markdown.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -34,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from itdr_agent import config  # noqa: E402
+from itdr_agent import config, voice  # noqa: E402
 from itdr_agent.adjudicator import DEFAULT_MODEL, Adjudicator  # noqa: E402
 from itdr_agent.fixture_store import get_store  # noqa: E402
 from itdr_agent.gui_run import BatchRunner, GuiRun  # noqa: E402
@@ -69,6 +75,8 @@ STATUS_WORDS = {
 REQUESTS_PER_RUN = (6, 10)
 FREE_DAILY_CAP = 50
 BATCH_POLL_SECONDS = 2.0
+VOICE_HINT = f"Start with the wake word \"{voice.WAKE_WORD}\": \"zero run all\", \"zero open alert 6\", \"zero approve\", \"zero reject because …\", \"zero edit step 1 to …\", \"zero expected\", \"zero skip\", \"zero back\"."
+READ_BACK = {"approve": "Approve", "reject": "Reject", "edit": "Edit"}
 
 
 def _audit_path() -> Path:
@@ -268,6 +276,168 @@ def _skip_answer(run: GuiRun) -> None:
     _guarded(lambda: run.answer(None))
 
 
+# --- voice -------------------------------------------------------------------
+
+
+def _say(message: str) -> None:
+    st.session_state["voice_message"] = message
+
+
+def _typed_command() -> None:
+    """on_change of the typed box: hand the text to the same path as the mic."""
+    text = (st.session_state.get("voice_typed") or "").strip()
+    if text:
+        st.session_state["voice_text"] = text
+    st.session_state["voice_typed"] = ""
+
+
+def _current_run() -> GuiRun | None:
+    open_id = st.session_state.get("open")
+    return _runs().get(open_id) if open_id else None
+
+
+def _execute_pending() -> None:
+    pending = st.session_state.pop("voice_pending", None)
+    if not pending:
+        return
+    run = _runs().get(pending["alert_id"])
+    if run is None or run.status != "review" or run.pending["index"] != pending["index"]:
+        _say("That step is no longer on screen; nothing was done.")
+        return
+    action = pending["action"]
+    try:
+        if action == "approve":
+            run.decide("approve")
+        elif action == "reject":
+            run.decide("reject", reason=pending.get("text") or "analyst rejected")
+        else:
+            run.decide("edit", edited_step=pending.get("text"))
+    except (ValueError, RuntimeError) as exc:
+        _say(str(exc))
+        return
+    _say(f"{READ_BACK[action]}d step {pending['index'] + 1} on {pending['alert_id']}.")
+
+
+def _apply_command(cmd: voice.Command | None, heard: str) -> None:
+    st.session_state["voice_heard"] = heard
+    if cmd is None:
+        _say(f"No wake word heard. {VOICE_HINT}")
+        return
+    run = _current_run()
+    alerts = _alerts()
+    if cmd.action == "unknown":
+        _say(f"Didn't understand \"{heard}\". {VOICE_HINT}")
+    elif cmd.action == "run_all":
+        _start_batch(list(st.session_state.get("queue_rows") or alerts))
+        _say("Running every alert in the queue, one at a time.")
+    elif cmd.action == "run":
+        known = [a for a in cmd.alerts if a in alerts]
+        if not known:
+            _say(f"No such alert: {', '.join(cmd.alerts)}.")
+        else:
+            _start_batch(known)
+            _say(f"Running {', '.join(known)}.")
+    elif cmd.action == "open":
+        alert_id = cmd.alerts[0] if cmd.alerts else ""
+        if alert_id in alerts:
+            _open_or_select(alert_id)
+            _say(f"Opened {alert_id}.")
+        else:
+            _say(f"No such alert: {alert_id}.")
+    elif cmd.action == "back":
+        st.session_state.pop("open", None)
+        st.session_state.pop("selected_alert", None)
+        st.session_state.pop("voice_pending", None)
+        _say("Back to the queue.")
+    elif cmd.action == "yes":
+        if st.session_state.get("voice_pending"):
+            _execute_pending()
+        else:
+            _say("Nothing is waiting for a yes.")
+    elif cmd.action == "no":
+        if st.session_state.pop("voice_pending", None):
+            _say("Cancelled; the step is still waiting for your decision.")
+        else:
+            _say("Nothing to cancel.")
+    elif cmd.action == "skip":
+        if run is not None and run.status == "question":
+            _guarded(lambda: run.answer(None))
+            _say("Skipped the question (no decision has been supplied).")
+        else:
+            _say("No question is on screen.")
+    elif cmd.action == "answer":
+        if run is not None and run.status == "question":
+            _guarded(lambda: run.answer(choice_index=cmd.choice))
+            _say(f"Answered: {cmd.text}.")
+        else:
+            _say("No question is on screen.")
+    elif cmd.action in READ_BACK:
+        if run is None or run.status != "review":
+            _say("No containment step is on screen to decide.")
+            return
+        index = run.pending["index"]
+        if cmd.step is not None and cmd.step != index + 1:
+            _say(f"You said step {cmd.step}, but step {index + 1} is the one on screen. Nothing was done.")
+            return
+        if cmd.action == "edit" and not cmd.text:
+            _say("Say what the step should become: \"zero edit step 1 to …\".")
+            return
+        st.session_state["voice_pending"] = {
+            "action": cmd.action, "alert_id": run.alert["id"], "index": index,
+            "text": cmd.text,
+        }
+        _say("")
+
+
+def _process_voice_text() -> None:
+    """Runs first on every draw: consume a transcript the mic or the box left."""
+    text = st.session_state.pop("voice_text", None)
+    if text:
+        _apply_command(voice.parse_command(text), text)
+
+
+def _read_back_line() -> str | None:
+    pending = st.session_state.get("voice_pending")
+    if not pending:
+        return None
+    line = f"{READ_BACK[pending['action']]} step {pending['index'] + 1} on {pending['alert_id']}?"
+    if pending.get("text"):
+        line += f" ({'reason' if pending['action'] == 'reject' else 'new step'}: {pending['text']})"
+    return line
+
+
+def _voice_panel() -> None:
+    with st.expander("Voice command", expanded=bool(st.session_state.get("voice_pending"))):
+        n = st.session_state.get("voice_mic_n", 0)
+        audio = st.audio_input("Say a command", key=f"voice_mic_{n}")
+        if audio is not None:
+            data = audio.getvalue()
+            digest = hashlib.sha1(data).hexdigest()
+            if data and digest != st.session_state.get("voice_mic_seen"):
+                st.session_state["voice_mic_seen"] = digest
+                st.session_state["voice_mic_n"] = n + 1
+                try:
+                    st.session_state["voice_text"] = voice.transcribe(data)
+                except voice.VoiceError as exc:
+                    _say(f"Couldn't transcribe: {exc}")
+                st.rerun()
+        st.text_input("Or type a command", key="voice_typed",
+                      placeholder="zero run all", on_change=_typed_command)
+        st.caption(VOICE_HINT)
+        heard = st.session_state.get("voice_heard")
+        if heard:
+            st.text(f"Heard: {heard}")
+        line = _read_back_line()
+        if line:
+            st.warning(f"{line} Say \"zero yes\" or press Yes.")
+            yes, no = st.columns(2)
+            yes.button("Yes", key="voice_yes", type="primary", on_click=_execute_pending)
+            no.button("No", key="voice_no", on_click=lambda: st.session_state.pop("voice_pending", None))
+        message = st.session_state.get("voice_message")
+        if message:
+            st.text(message)
+
+
 # --- page ------------------------------------------------------------------
 
 
@@ -291,6 +461,14 @@ def _sidebar() -> tuple[str, str, bool]:
             ready = False
             st.sidebar.error("OPENROUTER_API_KEY is not set. Add it to .env.")
         st.sidebar.caption("Each live run uses about 6-10 requests of your daily limit.")
+    if voice.server_reachable():
+        st.sidebar.caption("Whisper server: reachable, the mic works.")
+    else:
+        st.sidebar.caption(
+            "Whisper server: not running (typed commands still work). Start it: "
+            "whisper-server --host 127.0.0.1 --port 2022 -m ~/whisper-models/ggml-small.en.bin "
+            "--inference-path /v1/audio/transcriptions"
+        )
     alerts = _alerts()
     st.sidebar.selectbox(
         "Alert",
@@ -518,6 +696,7 @@ def _home() -> None:
         disabled=not rows or busy,
         on_click=_run_all_clicked,
     )
+    _voice_panel()
     if busy:
         batch = _batch()
         now = f", now {batch.current}" if batch.current else ""
@@ -578,6 +757,7 @@ def _run_page(run: GuiRun) -> None:
         st.rerun()
     if st.session_state.get("flash"):
         st.error(st.session_state["flash"])
+    _voice_panel()
     if status == "running":
         # Update only the tool-call list in place while the model works; a
         # full-page rerun on every poll made the page flash (30-60 s live).
@@ -609,6 +789,7 @@ def _selected_page(alert: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Countersign: Layer Zero", layout="wide")
+    _process_voice_text()  # a command from the mic or the typed box, if any
     open_id: str | None = st.session_state.get("open")
     run: GuiRun | None = _runs().get(open_id) if open_id else None
     selected: str | None = st.session_state.get("selected_alert")

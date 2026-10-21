@@ -182,7 +182,7 @@ def test_server_reachable_is_false_on_a_closed_port():
 # --- the page: typed fallback drives the same path as the mic ---------------
 
 pytest.importorskip("streamlit")
-from test_app import _app, _events, _page_text, _start, _statuses  # noqa: E402
+from test_app import _app, _events, _page_text, _start, _statuses, audit  # noqa: E402, F401
 
 
 def _say(at, text):
@@ -260,7 +260,6 @@ def test_voice_back_returns_to_the_queue(audit):
     assert _statuses(at)["ALERT_001"] == "Waiting on you"
 
 
-def test_mic_transcription_error_shows_a_message_not_a_crash(audit, monkeypatch):
-    import app as _  # noqa: F401  (the page module name under AppTest is dynamic)
+def test_page_shows_the_whisper_server_status(audit):
     at = _app()
-    assert "whisper" in _page_text(at).lower()  # server status line on the page
+    assert "whisper server" in _page_text(at).lower()
