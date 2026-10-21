@@ -297,3 +297,39 @@ def test_every_verdict_has_a_conclusion():
             _alert(), _result(verdict=verdict.value, confidence=0.75, steps=[])
         )
         assert "Conclusion:  Stage" not in note, verdict
+
+
+# --- GUI rebuild checkpoint 4: tool results in plain words ------------------
+
+
+def test_describe_tool_result_covers_every_tool():
+    from itdr_agent.summary import describe_tool_result
+    from itdr_agent.tools import TOOL_SPECS
+
+    for name in TOOL_SPECS:
+        assert isinstance(describe_tool_result(name, None), str)
+
+
+def test_describe_tool_result_wording():
+    from itdr_agent.summary import describe_tool_result as d
+
+    assert d("get_user_profile", {"jobTitle": "Director", "department": "Sales"}) == "Director, Sales"
+    assert d("get_user_profile", None) == "no such user"
+    denied = {"errorCode": 500121, "failureReason": "Authentication failed: MFA denied by user"}
+    ok = {"errorCode": 0, "failureReason": ""}
+    sign_ins = [{"status": denied}] * 4 + [{"status": ok}] * 5
+    assert d("get_sign_in_history", sign_ins) == "9 sign-ins, 4 MFA denied"
+    assert d("get_sign_in_history", []) == "no sign-ins"
+    assert d("get_device_trust", {"displayName": "LAPTOP-7206", "operatingSystem": "Windows 11", "isManaged": True}) == "LAPTOP-7206 (Windows 11), managed"
+    assert d("get_device_trust", {"displayName": "LAPTOP-1", "isManaged": False}) == "LAPTOP-1, unmanaged"
+    assert d("get_directory_audits", [{"activityDisplayName": "Add member to role"}]) == "1 change: Add member to role"
+    assert d("get_directory_audits", []) == "0 changes"
+    assert d("get_risky_user_report", {"riskLevel": "high", "riskState": "atRisk"}) == "risk high, atRisk"
+    assert d("get_risky_user_report", None) == "no risk report"
+
+
+def test_describe_tool_result_never_includes_an_ip():
+    from itdr_agent.summary import describe_tool_result as d
+
+    text = d("get_sign_in_history", [{"status": {"errorCode": 0}, "ipAddress": "203.0.113.10"}])
+    assert "203.0.113.10" not in text

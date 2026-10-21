@@ -485,3 +485,44 @@ def test_batch_runner_counts_progress_while_running(tmp_path):
     batch.wait(WAIT)
     assert batch.completed == batch.total == 2
     assert all(r.status == "review" for r in runs)
+
+
+# --- GUI rebuild checkpoint 4: the recorded tool calls carry a summary -------
+
+
+def test_tool_calls_carry_a_plain_summary(tmp_path):
+    run, _, _ = _make(tmp_path, [_report()])
+    run.start()
+    run.wait(WAIT)
+    by_name = {}
+    for call in run.tool_calls:
+        by_name.setdefault(call["tool"], call)
+    assert "sign-ins" in by_name["get_sign_in_history"]["summary"]
+    assert by_name["get_user_profile"]["summary"]  # job title, department
+    assert all("summary" in c for c in run.tool_calls)
+    run.decide("approve")
+    run.wait(WAIT)
+
+
+def test_failed_tool_call_summary_says_so(tmp_path):
+    from itdr_agent.sim_api import SimulatedGraphError
+
+    upn = _alert()["userPrincipalName"]
+
+    def flaky(name, arguments):
+        raise SimulatedGraphError(429)
+
+    def build(reviewer, tool_executor):
+        investigator = Investigator(
+            ToolScriptLLM([{"action": "final"}]), tool_executor=tool_executor
+        )
+        return Orchestrator(
+            investigator, Adjudicator(CompleteLLM([])), reviewer,
+            audit_log=tmp_path / "audit.jsonl",
+        )
+
+    run = GuiRun(build, _alert(), tool_call=flaky)
+    run.start()
+    run.wait(WAIT)
+    assert run.tool_calls[0]["ok"] is False
+    assert "429" in run.tool_calls[0]["summary"]

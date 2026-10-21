@@ -506,3 +506,27 @@ def test_header_strip_shows_the_brand_and_nav(audit):
     assert "Offline demo" in text  # the mode pill
     at = _start(at, "ALERT_001")
     assert "LAYER ZERO" in _page_text(at)  # same header on the run page
+
+
+# --- GUI rebuild checkpoint 4: the agent activity feed -----------------------
+
+
+def test_run_page_shows_the_agent_activity_feed(audit):
+    at = _start(_app(), "ALERT_002")
+    text = _page_text(at)
+    assert "Agent activity" in text
+    assert "get_sign_in_history" in text          # the real tool name, as on the canvas
+    assert "sign-ins, 4 MFA denied" in text       # its result in plain words
+    assert "Director" in text or "Sales" in text  # the profile call's summary
+    assert "by code" in text                      # the 3 pre-fetches are marked
+    assert "Verdict: COMPROMISED 0.90" in text
+    assert "Waiting for your countersign" in text
+    assert "Investigator tool calls" not in text  # the old raw list is gone
+
+
+def test_feed_on_a_closed_run_shows_tokens(audit):
+    at = _start(_app(), "ALERT_010")
+    text = _page_text(at)
+    assert "Agent activity" in text
+    assert "Tokens: no model calls" in text
+    assert "Closed" in text
