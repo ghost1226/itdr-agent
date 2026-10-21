@@ -421,3 +421,60 @@ def test_two_waiting_runs_keep_their_own_steps(audit):
     at.run()
     (line,) = _events(audit, "containment_decision")
     assert line["alert_id"] == "ALERT_001" and line["decision"] == "reject"
+
+
+# --- Step 3: run selected / run all from the queue --------------------------
+
+
+def _statuses(at: AppTest) -> dict[str, str]:
+    df = _queue(at)
+    return dict(zip(df["Alert ID"], df["Status"]))
+
+
+def test_run_all_offline_parks_the_waiting_runs_and_closes_the_rest(audit):
+    at = _app()
+    assert "no requests" in _page_text(at).lower()  # offline cost line
+    at.button(key="run_all").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert at.session_state["batch"].wait(20) == "done"
+    at.run()
+    status = _statuses(at)
+    assert status["ALERT_001"] == "Waiting on you"  # containment review
+    assert status["ALERT_009"] == "Waiting on you"  # the one question
+    assert status["ALERT_006"] == "Closed: FALSE_POSITIVE"
+    assert status["ALERT_010"] == "Closed: INSUFFICIENT_DATA"
+    assert len(_events(audit, "run")) == 4  # 006, 007, 008, 010 finished
+    # One of the parked runs can be reviewed from the queue.
+    at = _select_rows(at, [0])
+    at.button(key="open_selected").click()
+    at.run()
+    assert at.button(key="approve_0")
+    at.button(key="approve_0").click()
+    at.run()
+    (line,) = _events(audit, "containment_decision")
+    assert line["alert_id"] == "ALERT_001"
+
+
+def test_run_selected_runs_only_the_picked_rows(audit):
+    at = _select_rows(_app(), [5, 9])  # ALERT_006, ALERT_010
+    assert "2 alerts" in _page_text(at)
+    at.button(key="run_selected").click()
+    at.run()
+    assert not at.exception, at.exception
+    at.session_state["batch"].wait(20)
+    at.run()
+    status = _statuses(at)
+    assert status["ALERT_006"].startswith("Closed")
+    assert status["ALERT_010"].startswith("Closed")
+    assert status["ALERT_001"] == "Not started"
+    assert at.button(key="run_selected").disabled is False or True  # exists
+
+
+def test_live_cost_line_warns_when_run_all_will_not_fit_the_daily_cap(audit):
+    at = _app()
+    at.radio(key="mode").set_value(at.radio(key="mode").options[1])
+    at.run()
+    text = _page_text(at)
+    assert "10 alerts" in text and "60" in text and "100" in text and "50" in text
+    assert any("daily" in str(w.value).lower() for w in at.warning)

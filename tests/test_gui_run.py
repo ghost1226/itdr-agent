@@ -435,3 +435,53 @@ def test_edit_rollback_only_from_the_page(tmp_path):
     assert step.rollback == "Have the user sign in again"
     line = _events(audit, "containment_decision")[0]
     assert line["final_rollback"] == "Have the user sign in again"
+
+
+# --- Voice + batch step 3: BatchRunner runs alerts one at a time -------------
+# A run that reaches the analyst (question/review) is parked on its own thread
+# and the batch moves on, so several runs can wait on Joe while only one is
+# ever investigating.
+
+try:
+    from itdr_agent.gui_run import BatchRunner  # noqa: E402
+except ImportError:  # red phase
+    BatchRunner = None
+
+
+def _batch(tmp_path, alert_ids):
+    runs = []
+    for alert_id in alert_ids:
+        run, _, _ = _make(tmp_path, [_report()], alert_id=alert_id)
+        runs.append(run)
+    return runs, BatchRunner(runs)
+
+
+def test_batch_runner_parks_waiting_runs_and_moves_on(tmp_path):
+    runs, batch = _batch(tmp_path, ["ALERT_001", "ALERT_002", "ALERT_010"])
+    assert batch.total == 3 and batch.status == "idle"
+    assert [r.status for r in runs] == ["idle", "idle", "idle"]
+    batch.start()
+    assert batch.wait(WAIT) == "done"
+    assert [r.status for r in runs] == ["review", "review", "done"]
+    assert batch.order == ["ALERT_001", "ALERT_002", "ALERT_010"]
+    assert batch.completed == 3 and batch.current is None
+    for run in runs[:2]:
+        run.decide("approve")
+        run.wait(WAIT)
+    assert all(r.status == "done" for r in runs)
+
+
+def test_batch_runner_start_twice_is_refused(tmp_path):
+    _runs, batch = _batch(tmp_path, ["ALERT_010"])
+    batch.start()
+    with pytest.raises(RuntimeError):
+        batch.start()
+    batch.wait(WAIT)
+
+
+def test_batch_runner_counts_progress_while_running(tmp_path):
+    runs, batch = _batch(tmp_path, ["ALERT_001", "ALERT_002"])
+    batch.start()
+    batch.wait(WAIT)
+    assert batch.completed == batch.total == 2
+    assert all(r.status == "review" for r in runs)
