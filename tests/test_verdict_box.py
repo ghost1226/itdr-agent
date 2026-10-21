@@ -227,3 +227,89 @@ def test_what_happened_stays_on_the_report(tmp_path, monkeypatch):
     items = _in_order(at)
     line = _index(items, "ALERT_010 · ")
     assert items[line + 1] == ("markdown", "**What happened:**")
+
+
+# --- GUI rebuild checkpoint 2: the four cards, code-built ---------------------
+
+
+def test_technique_names_cover_every_mapped_technique():
+    from itdr_agent.data_generator import SCENARIO_TECHNIQUES
+    from itdr_agent.summary import TECHNIQUE_NAMES
+
+    for technique in SCENARIO_TECHNIQUES.values():
+        assert technique in TECHNIQUE_NAMES
+    assert TECHNIQUE_NAMES["T1621"] == "MFA Request Generation"
+
+
+def test_technique_card_names_the_technique_and_its_evidence_count():
+    from itdr_agent.summary import technique_card
+
+    assert technique_card(_report(), _dossier()) == (
+        "T1621", "MFA Request Generation", "tied to 3 records")
+    none = technique_card(_report(mitre_techniques_observed=[]), _dossier())
+    assert none == ("None", "No technique proved", "no evidence-backed pattern")
+
+
+def test_blast_radius_reads_the_audits_in_code():
+    from itdr_agent.summary import blast_radius
+
+    assert blast_radius(_dossier()) == ("Account", "No role, app or consent changes found")
+    consent = {"id": "a1", "activityDisplayName": "Consent to application",
+               "targetResources": [{"type": "Application", "displayName": "EvilSync"},
+                                   {"type": "User", "userPrincipalName": BOB}]}
+    assert blast_radius(_dossier(directory_audits=[consent])) == (
+        "Apps", "1 app consent: EvilSync")
+    role = {"id": "a2", "activityDisplayName": "Add member to role",
+            "targetResources": [{"type": "Role", "displayName": "Global Administrator"},
+                                {"type": "User", "userPrincipalName": BOB}]}
+    assert blast_radius(_dossier(directory_audits=[consent, role])) == (
+        "Roles", "1 role added: Global Administrator; 1 app consent: EvilSync")
+
+
+def test_blast_radius_ignores_roles_the_user_only_granted():
+    from itdr_agent.summary import blast_radius
+
+    other = {"id": "a3", "activityDisplayName": "Add member to role",
+             "initiatedBy": {"user": {"userPrincipalName": BOB}},
+             "targetResources": [{"type": "Role", "displayName": "Helpdesk Administrator"},
+                                 {"type": "User", "userPrincipalName": "other@contoso.com"}]}
+    assert blast_radius(_dossier(directory_audits=[other]))[0] == "Account"
+
+
+def test_alert_line_has_what_app_place_time_and_no_ip():
+    from itdr_agent.summary import alert_line
+
+    line = alert_line(_alert())
+    assert line == "MFA denied · Microsoft Teams · Seattle, US · 2025-01-15 09:00Z"
+    assert "203.0.113.77" not in line
+    travel = _alert(riskEventTypes_v2=["unlikelyTravel"], status={"errorCode": 0, "failureReason": ""})
+    assert alert_line(travel).startswith("Unlikely travel · ")
+
+
+def test_run_page_shows_the_four_cards(tmp_path, monkeypatch):
+    pytest.importorskip("streamlit")
+    from test_app import _app, _page_text, _start
+
+    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    at = _start(_app(), "ALERT_001")  # offline: COMPROMISED 0.9, T1078.004, 1 step
+    text = _page_text(at)
+    for label in ("VERDICT", "TECHNIQUE", "BLAST RADIUS", "STATUS"):
+        assert label in text
+    assert "COMPROMISED" in text and "0.90" in text and "0.70" in text
+    assert "T1078.004" in text and "Valid Accounts: Cloud Accounts" in text
+    assert "No role, app or consent changes found" in text
+    assert "Waiting on you" in text and "1 step needs your countersign" in text
+    assert "Risk: high" in text
+    assert "203.0.113" not in text  # never an IP on screen
+
+
+def test_run_page_cards_on_a_closed_run(tmp_path, monkeypatch):
+    pytest.importorskip("streamlit")
+    from test_app import _app, _page_text, _start
+
+    monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    at = _start(_app(), "ALERT_010")  # short-circuits: INSUFFICIENT_DATA, closed
+    text = _page_text(at)
+    assert "INSUFFICIENT_DATA" in text
+    assert "Closed" in text
+    assert "No technique proved" in text
