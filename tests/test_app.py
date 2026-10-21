@@ -351,3 +351,67 @@ def test_edit_the_rollback_on_the_page(audit):
     assert not at.exception, at.exception
     line = _events(audit, "containment_decision")[0]
     assert line["final_rollback"] == "Re-enable after ID check"
+
+
+# --- Voice + batch build, step 1: the GUI carries the product name ----------
+
+
+def test_gui_is_named_countersign_layer_zero(audit):
+    at = _app()
+    assert at.sidebar.title[0].value == "Countersign: Layer Zero"
+    assert 'page_title="Countersign: Layer Zero"' in (PROJECT_ROOT / "app.py").read_text()
+
+
+# --- Step 2: Back to queue must not drop a run that waits on the analyst ----
+
+
+def _select_rows(at: AppTest, rows: list[int]) -> AppTest:
+    at.session_state["queue"] = {
+        "selection": {"rows": rows, "columns": [], "cells": []}
+    }
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+def test_back_to_queue_keeps_a_waiting_run(audit):
+    at = _start(_app(), "ALERT_001")
+    assert at.button(key="approve_0")  # waiting on the analyst
+    at.button(key="back_to_queue").click()
+    at.run()
+    assert not at.exception, at.exception
+    df = _queue(at)
+    assert df[df["Alert ID"] == "ALERT_001"].iloc[0]["Status"] == "Waiting on you"
+    # Open the row again: the same run, same step, nothing was dropped.
+    at = _select_rows(at, [0])
+    at.button(key="open_selected").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert at.button(key="approve_0")
+    at.button(key="approve_0").click()
+    at.run()
+    assert not at.exception, at.exception
+    (line,) = _events(audit, "containment_decision")
+    assert line["decision"] == "approve"
+    assert "containment_decision" in _page_text(at)
+
+
+def test_two_waiting_runs_keep_their_own_steps(audit):
+    at = _start(_app(), "ALERT_001")
+    at.button(key="back_to_queue").click()
+    at.run()
+    at = _start(at, "ALERT_002")
+    assert "ALERT_002" in _page_text(at)
+    at.button(key="back_to_queue").click()
+    at.run()
+    df = _queue(at)
+    waiting = set(df[df["Status"] == "Waiting on you"]["Alert ID"])
+    assert waiting == {"ALERT_001", "ALERT_002"}
+    at = _select_rows(at, [0])
+    at.button(key="open_selected").click()
+    at.run()
+    assert "ALERT_001" in _page_text(at)
+    at.button(key="reject_0").click()
+    at.run()
+    (line,) = _events(audit, "containment_decision")
+    assert line["alert_id"] == "ALERT_001" and line["decision"] == "reject"
