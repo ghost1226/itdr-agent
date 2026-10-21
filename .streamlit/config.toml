@@ -7,3 +7,18 @@ headless = true
 
 [client]
 toolbarMode = "minimal"
+
+# Countersign: Layer Zero brand (canvas: Countersign ITDR Design, Joe approved 2026-10-18).
+# Night / Panel / Signal / Text; IBM Plex Sans + Mono (Google Fonts, OFL), loaded by app.py.
+[theme]
+base = "dark"
+primaryColor = "#F5A524"
+backgroundColor = "#0B0F14"
+secondaryBackgroundColor = "#121821"
+textColor = "#E6EDF3"
+linkColor = "#F5A524"
+borderColor = "#232C38"
+font = "IBM Plex Sans, system-ui, sans-serif"
+codeFont = "IBM Plex Mono, monospace"
+headingFont = "IBM Plex Sans, system-ui, sans-serif"
+baseRadius = "0.6rem"

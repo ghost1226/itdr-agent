@@ -28,6 +28,7 @@ Anything the model wrote is shown with st.text, never rendered as markdown.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import sys
@@ -59,6 +60,23 @@ from itdr_agent.summary import (  # noqa: E402
 )
 
 APP_NAME = "Countersign: Layer Zero"
+# Brand tokens (canvas "Countersign ITDR Design", approved 2026-10-18).
+NIGHT, PANEL, LINE, SIGNAL, THREAT, BENIGN, TEXT, MUTED = (
+    "#0B0F14", "#121821", "#232C38", "#F5A524", "#FF7A45", "#5AA9FF", "#E6EDF3", "#A3AEBD",
+)
+FONTS_LINK = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600'
+    '&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">'
+)
+MARK_SVG = (
+    '<svg width="28" height="28" viewBox="0 0 132 132" aria-hidden="true">'
+    '<path d="M66 6 L118 32 L118 74 C118 100 96 118 66 126 C36 118 14 100 14 74 L14 32 Z" '
+    f'fill="none" stroke="{SIGNAL}" stroke-width="9" stroke-linejoin="round"></path>'
+    f'<path d="M40 66 L58 84" fill="none" stroke="{TEXT}" stroke-width="12" stroke-linecap="round"></path>'
+    f'<path d="M58 84 L94 46" fill="none" stroke="{SIGNAL}" stroke-width="12" stroke-linecap="round"></path>'
+    "</svg>"
+)
 OFFLINE = "Offline demo (no key, no model)"
 LIVE = "Live (OpenRouter, your own key)"
 POLL_SECONDS = 0.5
@@ -443,6 +461,58 @@ def _voice_panel() -> None:
             st.text(message)
 
 
+# --- the look ---------------------------------------------------------------
+
+
+def _brand_css() -> None:
+    """Fonts and the few global rules the theme file can't express.
+
+    Our own markup only; nothing the model wrote goes through here.
+    """
+    st.markdown(
+        FONTS_LINK
+        + "<style>"
+        f"html, body, [data-testid='stAppViewContainer'] {{ font-family: 'IBM Plex Sans', system-ui, sans-serif; }}"
+        f"code, pre, [data-testid='stCode'] {{ font-family: 'IBM Plex Mono', monospace; }}"
+        ".cs-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px;"
+        f" padding:10px 4px 14px; border-bottom:1px solid {LINE}; margin-bottom:8px; }}"
+        ".cs-brand { display:flex; align-items:center; gap:12px; }"
+        f".cs-brand .name {{ font-size:18px; font-weight:600; color:{TEXT}; }}"
+        f".cs-brand .layer {{ font-family:'IBM Plex Mono', monospace; font-size:13px; color:{SIGNAL}; letter-spacing:0.08em; }}"
+        ".cs-nav { display:flex; flex-wrap:wrap; gap:6px; }"
+        f".cs-nav span {{ padding:8px 14px; border-radius:8px; color:{MUTED}; font-size:14px; }}"
+        f".cs-nav span.on {{ background:#1A2230; color:{TEXT}; }}"
+        f".cs-pill {{ display:flex; align-items:center; gap:10px; font-family:'IBM Plex Mono', monospace; font-size:13px; color:{MUTED}; }}"
+        ".cs-pill i { width:8px; height:8px; border-radius:50%; display:inline-block; }"
+        f".cs-chip {{ font-family:'IBM Plex Mono', monospace; font-size:12px; padding:3px 8px; border-radius:6px; background:#1A2230; color:{TEXT}; }}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
+
+def _header(page: str, mode: str, model: str) -> None:
+    """The Countersign strip: mark, wordmark, nav, mode pill. Static markup."""
+    nav = "".join(
+        f'<span class="{"on" if key == page else ""}">{html.escape(label)}</span>'
+        for key, label in (
+            ("queue", f"Queue ({len(_alerts())})"),
+            ("investigation", "Investigation"),
+            ("audit", "Audit log"),
+        )
+    )
+    live = mode == LIVE
+    pill = (
+        f'<span class="cs-pill"><i style="background:{BENIGN if live else MUTED}"></i>'
+        f"{'Live · ' + html.escape(model) if live else 'Offline demo'}</span>"
+    )
+    st.markdown(
+        f'<div class="cs-header"><div class="cs-brand">{MARK_SVG}'
+        f'<span class="name">Countersign</span><span class="layer">LAYER ZERO</span></div>'
+        f'<nav class="cs-nav" aria-label="Main">{nav}</nav>{pill}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 # --- page ------------------------------------------------------------------
 
 
@@ -794,11 +864,17 @@ def _selected_page(alert: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Countersign: Layer Zero", layout="wide")
+    _brand_css()
     _process_voice_text()  # a command from the mic or the typed box, if any
     open_id: str | None = st.session_state.get("open")
     run: GuiRun | None = _runs().get(open_id) if open_id else None
     selected: str | None = st.session_state.get("selected_alert")
     on_home = run is None and selected is None
+    _header(
+        "queue" if on_home else "investigation",
+        st.session_state.get("mode", OFFLINE),
+        os.getenv("EVAL_MODEL", DEFAULT_MODEL),
+    )
     if on_home:
         # Draw the queue first so a row selection can set the sidebar alert
         # before the selectbox widget is created.
