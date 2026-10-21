@@ -530,3 +530,28 @@ def test_feed_on_a_closed_run_shows_tokens(audit):
     assert "Agent activity" in text
     assert "Tokens: no model calls" in text
     assert "Closed" in text
+
+
+# --- GUI rebuild checkpoint 5: Containment: your countersign -----------------
+
+
+def test_review_screen_is_the_countersign_panel(audit):
+    at = _start(_app(), "ALERT_001")
+    text = _page_text(at)
+    assert "Containment: your countersign" in text
+    assert "Step 1 of 1" in text
+    assert "The agent only recommends. Nothing runs until you approve." in text
+    assert "Disable the account pending analyst review" in text
+    assert at.button(key="approve_0") and at.button(key="edit_0") and at.button(key="reject_0")
+    # The edit / reject boxes are tucked away until the analyst wants them.
+    labels = [str(e.label) for e in at.expander]
+    assert any("Edit" in l or "edit" in l for l in labels)
+    assert "Containment step 1: your decision" not in text  # the old heading
+
+
+def test_review_screen_keeps_the_narrative_and_the_ticket(audit):
+    at = _start(_app(), "ALERT_001")
+    text = _page_text(at)
+    assert "unlikely-travel" in text                  # the model's narrative, st.text
+    assert "Alert: ALERT_001" in text                 # Joe's ticket lines
+    assert "Action: Proposed, each step needs your approval below:" in text

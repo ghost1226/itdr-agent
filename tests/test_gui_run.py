@@ -526,3 +526,30 @@ def test_failed_tool_call_summary_says_so(tmp_path):
     run.wait(WAIT)
     assert run.tool_calls[0]["ok"] is False
     assert "429" in run.tool_calls[0]["summary"]
+
+
+# --- GUI rebuild checkpoint 5: decisions are remembered per step -------------
+
+
+def test_decisions_are_recorded_per_step(tmp_path):
+    steps = [
+        {"step": "Revoke sessions", "rollback": "User signs in again"},
+        {"step": "Reset the password", "rollback": "Issue a new temporary password"},
+        {"step": "Disable the account", "rollback": "Re-enable it"},
+    ]
+    run, _, _ = _make(tmp_path, [_report(containment_steps=steps)])
+    run.start()
+    run.wait(WAIT)
+    assert run.decisions == {}
+    assert run.pending["index"] == 0
+    run.decide("approve")
+    run.wait(WAIT)
+    assert run.decisions == {0: "approve"}
+    assert run.pending["index"] == 1
+    run.decide("edit", edited_step="Reset the password after a phone call")
+    run.wait(WAIT)
+    assert run.decisions == {0: "approve", 1: "edit"}
+    run.decide("reject", reason="not needed")
+    run.wait(WAIT)
+    assert run.status == "done"
+    assert run.decisions == {0: "approve", 1: "edit", 2: "reject"}
