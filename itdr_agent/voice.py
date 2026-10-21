@@ -105,23 +105,27 @@ def parse_command(text: str) -> Command | None:
     words = rest.split()
     head = words[0] if words else ""
 
-    if head == "run":
+    def is_(*stems: str) -> bool:
+        # Whisper writes "approved", "rejected", "running": match the stem.
+        return any(head.startswith(stem) for stem in stems)
+
+    if is_("run"):
         if re.search(r"\b(all|everything|every)\b", rest) or len(words) == 1:
             return Command("run_all", heard)
         ids = _alert_ids(rest)
         return Command("run", heard, alerts=ids) if ids else Command("unknown", heard)
-    if head in ("open", "show"):
+    if is_("open", "show"):
         ids = _alert_ids(rest)
         return Command("open", heard, alerts=ids[:1]) if ids else Command("unknown", heard)
-    if head == "approve":
+    if is_("approv"):
         return Command("approve", heard, step=_step(rest))
-    if head == "reject":
+    if is_("reject"):
         reason = None
         match = re.search(r"\bbecause\b\s*(.+)$", rest)
         if match:
             reason = match.group(1).strip() or None
         return Command("reject", heard, step=_step(rest), text=reason)
-    if head in ("edit", "change"):
+    if is_("edit", "chang"):
         match = re.search(r"\bto\b\s*(.+)$", rest)
         new_text = match.group(1).strip() if match else None
         return Command("edit", heard, step=_step(rest), text=new_text or None)

@@ -115,6 +115,20 @@ def test_answer_choice_index_follows_the_shared_options():
     assert parse_command("z don't know").choice == 2
 
 
+@pytest.mark.parametrize(
+    "text,action",
+    [
+        ("Z Approved Step 1.", "approve"),   # Whisper's spelling of "approve"
+        ("Z rejected step 1", "reject"),
+        ("Z opened alert 6", "open"),
+        ("Z running all", "run_all"),
+        ("Z edited step 1 to lock it", "edit"),
+    ],
+)
+def test_inflected_verbs_still_parse(text, action):
+    assert parse_command(text).action == action
+
+
 def test_unrecognised_words_after_the_wake_word():
     cmd = parse_command("z make me a sandwich")
     assert cmd.action == "unknown"
@@ -122,9 +136,9 @@ def test_unrecognised_words_after_the_wake_word():
 
 
 def test_command_is_frozen_and_keeps_what_was_heard():
-    cmd = parse_command("Zero, approve step 1.")
+    cmd = parse_command("Z, approve step 1.")
     assert isinstance(cmd, Command)
-    assert cmd.heard == "Zero, approve step 1."
+    assert cmd.heard == "Z, approve step 1."
     with pytest.raises(Exception):
         cmd.action = "reject"  # type: ignore[misc]
 
@@ -139,7 +153,7 @@ def test_transcribe_posts_a_wav_and_returns_the_text():
         seen["url"] = str(request.url)
         seen["content_type"] = request.headers.get("content-type", "")
         seen["body"] = request.content
-        return httpx.Response(200, json={"text": " zero run all \n"})
+        return httpx.Response(200, json={"text": " z  run all \n"})
 
     text = voice.transcribe(
         b"RIFFfakewav", url="http://127.0.0.1:2022/v1/audio/transcriptions",
