@@ -85,3 +85,19 @@ def test_flag_is_logged(tmp_path):
 def test_system_prompt_says_ip_range_is_never_evidence():
     assert "never evidence" in adj.SYSTEM_PROMPT
     assert "address range" in adj.SYSTEM_PROMPT
+
+
+# --- Review 2026-10-21 finding 2 (second half): moved steps are scanned too --
+
+
+def test_range_reasoning_in_a_moved_step_is_flagged():
+    raw = _report(
+        verdict="FALSE_POSITIVE",
+        confidence=0.9,
+        mitre_techniques_observed=[],
+        containment_steps=[{"step": "No action: the IP is in a TEST-NET range",
+                            "rollback": "n/a"}],
+    )
+    report = Adjudicator(CompleteLLM([raw]), baseline=None).adjudicate(_dossier())
+    assert report.containment_steps == []  # moved off the benign verdict
+    assert report.ip_range_reasoning, "the moved step's wording was not scanned"

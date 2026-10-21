@@ -93,3 +93,87 @@ def test_compromised_run_still_reviews_its_steps(tmp_path):
     events = [e["event"] for e in _audit(audit)]
     assert "containment_decision" in events
     assert "containment_moved" not in events
+
+
+# --- Review 2026-10-21 finding 2: a moved step kept its unsafe undo ---------
+# apply_no_containment_guard ran before the rollback guards, so a benign
+# verdict's step landed in recommended actions as "(undo: Revert the password
+# to its previous value)" with no flag. Now: known one-way steps get the
+# standard rollback before the move, anything still unsafe is marked in the
+# action text, recorded in moved_unsafe_rollbacks, and logged.
+
+from itdr_agent.adjudicator import Adjudicator  # noqa: E402
+from test_orchestrator import CompleteLLM  # noqa: E402
+
+UNSAFE_UNKNOWN = {"step": "Lock the account",
+                  "rollback": "Restore the old password"}
+UNSAFE_RESET = {"step": "Reset the user's password",
+                "rollback": "Revert the password to its previous value"}
+
+
+def _benign_report(**overrides) -> str:
+    return _report(verdict="FALSE_POSITIVE", confidence=0.9,
+                   mitre_techniques_observed=[], **overrides)
+
+
+def test_moved_step_with_an_unsafe_undo_is_flagged():
+    report = adj.apply_no_containment_guard(
+        _parsed(verdict="FALSE_POSITIVE", containment_steps=[UNSAFE_UNKNOWN])
+    )
+    (action,) = report.recommended_actions[1:]
+    assert "Lock the account" in action
+    assert "WARNING" in action and "credential" in action
+    assert report.moved_unsafe_rollbacks == [0]
+    assert "restore a credential" in report.audit_notes.lower()
+
+
+def test_moved_safe_undo_is_not_flagged():
+    report = adj.apply_no_containment_guard(
+        _parsed(verdict="FALSE_POSITIVE", containment_steps=[RESET])
+    )
+    assert "WARNING" not in report.recommended_actions[1]
+    assert report.moved_unsafe_rollbacks == []
+
+
+def test_moved_one_way_step_gets_the_standard_rollback_first():
+    llm = CompleteLLM([_benign_report(containment_steps=[UNSAFE_RESET])])
+    report = Adjudicator(llm, baseline=None).adjudicate(
+        _dossier(sign_in_history=[
+            {"id": f"s{i}", "createdDateTime": f"2025-01-15T0{i}:00:00Z",
+             "riskEventTypes_v2": []} for i in range(4)
+        ])
+    )
+    assert report.verdict is Verdict.FALSE_POSITIVE
+    assert report.containment_steps == []
+    (action,) = report.recommended_actions[1:]
+    assert adj.STANDARD_ROLLBACKS["password_reset"] in action
+    assert "Revert the password" not in action
+    assert report.moved_unsafe_rollbacks == []
+    assert report.standard_rollbacks == [0]
+
+
+def test_model_cannot_fill_moved_unsafe_rollbacks_itself():
+    import json
+
+    raw = json.loads(_benign_report())
+    raw["moved_unsafe_rollbacks"] = [7]
+    report = Adjudicator(CompleteLLM([json.dumps(raw)]), baseline=None).adjudicate(
+        _dossier(sign_in_history=[
+            {"id": f"s{i}", "createdDateTime": f"2025-01-15T0{i}:00:00Z",
+             "riskEventTypes_v2": []} for i in range(4)
+        ])
+    )
+    assert report.moved_unsafe_rollbacks == []
+
+
+def test_moved_unsafe_undo_is_logged(tmp_path):
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(), [_benign_report(containment_steps=[UNSAFE_UNKNOWN])]
+    )
+    result = orch.run({"id": "ALERT_006"}, run_id="r-moved-unsafe")
+    assert result.report.containment_steps == []
+    events = _audit(audit)
+    assert "containment_decision" not in [e["event"] for e in events]
+    (moved,) = [e for e in events if e["event"] == "containment_moved"]
+    assert moved["steps"] == 1
+    assert moved["unsafe_rollbacks"] == [0]
