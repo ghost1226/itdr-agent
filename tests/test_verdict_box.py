@@ -216,7 +216,8 @@ def test_what_happened_sits_right_below_the_alert_line(tmp_path, monkeypatch):
     assert 'class="cs-h1"' in items[line + 1][1]
     assert "alice.traveler@contoso.com had " in items[line + 1][1]
     assert 'class="cs-cards"' in items[line + 2][1]
-    assert _index(items, "**Verdict:") > line + 2
+    narrative_panel = next(i for i, (_t, v) in enumerate(items) if "narrative, word for word" in v)
+    assert narrative_panel > line + 2  # the verdict panel comes after the cards
     assert sum('class="cs-h1"' in v for _t, v in items) == 1
 
 
