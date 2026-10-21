@@ -18,9 +18,9 @@ leaves a run that waits on the analyst exactly where it is; the queue shows
 every run's live status and a row can be reopened.
 
 Voice: a mic button records a command, the local whisper.cpp server turns it
-into text, and ``itdr_agent.voice`` parses it in code (wake word "zero"). A
+into text, and ``itdr_agent.voice`` parses it in code (wake word "z"). A
 typed command box takes the same path when the mic or the server is down.
-Approve / reject / edit are read back and wait for "zero yes" or the button.
+Approve / reject / edit are read back and wait for "z yes" or the button.
 
 Anything the model wrote is shown with st.text, never rendered as markdown.
 """
@@ -75,7 +75,12 @@ STATUS_WORDS = {
 REQUESTS_PER_RUN = (6, 10)
 FREE_DAILY_CAP = 50
 BATCH_POLL_SECONDS = 2.0
-VOICE_HINT = f"Start with the wake word \"{voice.WAKE_WORD}\": \"zero run all\", \"zero open alert 6\", \"zero approve\", \"zero reject because …\", \"zero edit step 1 to …\", \"zero expected\", \"zero skip\", \"zero back\"."
+_W = voice.WAKE_WORD
+VOICE_HINT = (
+    f"Start with the wake word \"{_W}\" (said as the letter): \"{_W} run all\", "
+    f"\"{_W} open alert 6\", \"{_W} approve\", \"{_W} reject because …\", "
+    f"\"{_W} edit step 1 to …\", \"{_W} expected\", \"{_W} skip\", \"{_W} back\"."
+)
 READ_BACK = {"approve": "Approve", "reject": "Reject", "edit": "Edit"}
 
 
@@ -380,7 +385,7 @@ def _apply_command(cmd: voice.Command | None, heard: str) -> None:
             _say(f"You said step {cmd.step}, but step {index + 1} is the one on screen. Nothing was done.")
             return
         if cmd.action == "edit" and not cmd.text:
-            _say("Say what the step should become: \"zero edit step 1 to …\".")
+            _say(f"Say what the step should become: \"{_W} edit step 1 to …\".")
             return
         st.session_state["voice_pending"] = {
             "action": cmd.action, "alert_id": run.alert["id"], "index": index,
@@ -422,14 +427,14 @@ def _voice_panel() -> None:
                     _say(f"Couldn't transcribe: {exc}")
                 st.rerun()
         st.text_input("Or type a command", key="voice_typed",
-                      placeholder="zero run all", on_change=_typed_command)
+                      placeholder=f"{_W} run all", on_change=_typed_command)
         st.caption(VOICE_HINT)
         heard = st.session_state.get("voice_heard")
         if heard:
             st.text(f"Heard: {heard}")
         line = _read_back_line()
         if line:
-            st.warning(f"{line} Say \"zero yes\" or press Yes.")
+            st.warning(f"{line} Say \"{_W} yes\" or press Yes.")
             yes, no = st.columns(2)
             yes.button("Yes", key="voice_yes", type="primary", on_click=_execute_pending)
             no.button("No", key="voice_no", on_click=lambda: st.session_state.pop("voice_pending", None))

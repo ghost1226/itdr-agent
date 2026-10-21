@@ -97,17 +97,17 @@ Select rows in the queue and press **Run selected**, or press **Run all**. The b
 
 ### Voice commands
 
-The **Voice command** box on every page has a mic button and a typed fallback. Audio goes to a local whisper.cpp server and never leaves your machine; the words are parsed by code, not a model. Every command starts with the wake word **"zero"**; anything else is ignored.
+The **Voice command** box on every page has a mic button and a typed fallback. Audio goes to a local whisper.cpp server and never leaves your machine; the words are parsed by code, not a model. Every command starts with the wake word **"z"**, said as the letter (Whisper may write it Z, Zee or Zed; all work); anything else is ignored.
 
 | Say | Does |
 |---|---|
-| zero run all | runs every alert in the queue |
-| zero run 3 and 6 | runs ALERT_003 and ALERT_006 |
-| zero open alert 6 | opens ALERT_006 |
-| zero approve / zero reject because … / zero edit step 1 to … | read back on screen first; then **zero yes** (or the Yes button) acts, **zero no** cancels |
-| zero expected / zero suspicious / zero I don't know | answers the agent's one question |
-| zero skip | skips the question (no decision has been supplied) |
-| zero back | back to the queue |
+| z run all | runs every alert in the queue |
+| z run 3 and 6 | runs ALERT_003 and ALERT_006 |
+| z open alert 6 | opens ALERT_006 |
+| z approve / z reject because … / z edit step 1 to … | read back on screen first; then **z yes** (or the Yes button) acts, **z no** cancels |
+| z expected / z suspicious / z I don't know | answers the agent's one question |
+| z skip | skips the question (no decision has been supplied) |
+| z back | back to the queue |
 
 Start the Whisper server once (the sidebar says whether it is reachable; typed commands work without it):
 

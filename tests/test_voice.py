@@ -1,11 +1,11 @@
 """Voice + batch step 4: voice commands (offline, no mic, no network).
 
 The command parser is code, never a model: a transcript without the wake
-word "zero" is ignored; with it, a small grammar maps the words to one
+word "z" is ignored; with it, a small grammar maps the words to one
 action. The transcription client posts a WAV to the local whisper.cpp server
 and is tested against a fake HTTP transport. The page accepts a typed command
 as the fallback when the mic or the server is down, which is also how these
-tests drive it. Approve / reject / edit are read back and need a "zero yes".
+tests drive it. Approve / reject / edit are read back and need a "z yes".
 """
 
 from __future__ import annotations
@@ -32,15 +32,16 @@ except ImportError:  # red phase
 
 
 def test_wake_word_is_zero():
-    assert voice.WAKE_WORD == "zero"
+    assert voice.WAKE_WORD == "z"
+    assert voice.WAKE_SPELLINGS == {"z", "zee", "zed"}
 
 
-@pytest.mark.parametrize("text", ["run all", "approve", "Zero.", "", "hero run all"])
+@pytest.mark.parametrize("text", ["run all", "approve", "Z.", "", "zero run all", "zesty run all"])
 def test_without_the_wake_word_nothing_is_a_command(text):
     assert parse_command(text) is None
 
 
-@pytest.mark.parametrize("text", ["zero run all", "Zero, run all.", "hey zero run all", "ZERO run everything"])
+@pytest.mark.parametrize("text", ["z run all", "Z, run all.", "Zee run all", "Zed run everything", "hey z run all"])
 def test_run_all(text):
     cmd = parse_command(text)
     assert cmd.action == "run_all"
@@ -52,10 +53,10 @@ def test_run_all(text):
 @pytest.mark.parametrize(
     "text,alerts",
     [
-        ("zero run 3 and 6", ("ALERT_003", "ALERT_006")),
-        ("zero run alerts three and six", ("ALERT_003", "ALERT_006")),
-        ("zero run alert 10", ("ALERT_010",)),
-        ("zero run 1, 2, 3", ("ALERT_001", "ALERT_002", "ALERT_003")),
+        ("z run 3 and 6", ("ALERT_003", "ALERT_006")),
+        ("z run alerts three and six", ("ALERT_003", "ALERT_006")),
+        ("z run alert 10", ("ALERT_010",)),
+        ("z run 1, 2, 3", ("ALERT_001", "ALERT_002", "ALERT_003")),
     ],
 )
 def test_run_some_alerts(text, alerts):
@@ -63,45 +64,45 @@ def test_run_some_alerts(text, alerts):
     assert cmd.action == "run" and cmd.alerts == alerts
 
 
-@pytest.mark.parametrize("text", ["zero open alert 6", "zero open six", "zero show alert 6"])
+@pytest.mark.parametrize("text", ["z open alert 6", "z open six", "z show alert 6"])
 def test_open_alert(text):
     cmd = parse_command(text)
     assert cmd.action == "open" and cmd.alerts == ("ALERT_006",)
 
 
 def test_approve_with_and_without_a_step():
-    assert parse_command("zero approve").action == "approve"
-    assert parse_command("zero approve").step is None
-    cmd = parse_command("zero approve step 2")
+    assert parse_command("z approve").action == "approve"
+    assert parse_command("z approve").step is None
+    cmd = parse_command("z approve step 2")
     assert (cmd.action, cmd.step) == ("approve", 2)
 
 
 def test_reject_with_a_reason():
-    cmd = parse_command("zero reject step 1 because the user is traveling")
+    cmd = parse_command("z reject step 1 because the user is traveling")
     assert (cmd.action, cmd.step, cmd.text) == ("reject", 1, "the user is traveling")
-    assert parse_command("zero reject").text is None
+    assert parse_command("z reject").text is None
 
 
 def test_edit_takes_the_new_step_text():
-    cmd = parse_command("zero edit step 1 to revoke sessions only")
+    cmd = parse_command("z edit step 1 to revoke sessions only")
     assert (cmd.action, cmd.step, cmd.text) == ("edit", 1, "revoke sessions only")
 
 
 @pytest.mark.parametrize(
     "text,action",
     [
-        ("zero skip", "skip"),
-        ("zero no decision", "skip"),
-        ("zero back", "back"),
-        ("zero back to queue", "back"),
-        ("zero yes", "yes"),
-        ("zero confirm", "yes"),
-        ("zero no", "no"),
-        ("zero cancel", "no"),
-        ("zero expected", "answer"),
-        ("zero it's benign", "answer"),
-        ("zero suspicious", "answer"),
-        ("zero I don't know", "answer"),
+        ("z skip", "skip"),
+        ("z no decision", "skip"),
+        ("z back", "back"),
+        ("z back to queue", "back"),
+        ("z yes", "yes"),
+        ("z confirm", "yes"),
+        ("z no", "no"),
+        ("z cancel", "no"),
+        ("z expected", "answer"),
+        ("z it's benign", "answer"),
+        ("z suspicious", "answer"),
+        ("z I don't know", "answer"),
     ],
 )
 def test_short_commands(text, action):
@@ -109,15 +110,15 @@ def test_short_commands(text, action):
 
 
 def test_answer_choice_index_follows_the_shared_options():
-    assert parse_command("zero expected").choice == 0
-    assert parse_command("zero suspicious").choice == 1
-    assert parse_command("zero don't know").choice == 2
+    assert parse_command("z expected").choice == 0
+    assert parse_command("z suspicious").choice == 1
+    assert parse_command("z don't know").choice == 2
 
 
 def test_unrecognised_words_after_the_wake_word():
-    cmd = parse_command("zero make me a sandwich")
+    cmd = parse_command("z make me a sandwich")
     assert cmd.action == "unknown"
-    assert cmd.heard == "zero make me a sandwich"
+    assert cmd.heard == "z make me a sandwich"
 
 
 def test_command_is_frozen_and_keeps_what_was_heard():
@@ -144,7 +145,7 @@ def test_transcribe_posts_a_wav_and_returns_the_text():
         b"RIFFfakewav", url="http://127.0.0.1:2022/v1/audio/transcriptions",
         transport=httpx.MockTransport(handler),
     )
-    assert text == "zero run all"
+    assert text == "z run all"
     assert seen["url"].endswith("/v1/audio/transcriptions")
     assert "multipart/form-data" in seen["content_type"]
     assert b"RIFFfakewav" in seen["body"]
@@ -198,41 +199,41 @@ def test_typed_command_without_wake_word_is_ignored(audit):
 
 
 def test_typed_run_all_starts_the_batch(audit):
-    at = _say(_app(), "zero run all")
+    at = _say(_app(), "z run all")
     assert at.session_state["batch"].wait(20) == "done"
     at.run()
     assert _statuses(at)["ALERT_001"] == "Waiting on you"
 
 
 def test_typed_open_alert_shows_the_run_page(audit):
-    at = _say(_app(), "zero open alert 3")
+    at = _say(_app(), "z open alert 3")
     assert "ALERT_003" in _page_text(at)
     assert at.button(key="back_to_queue")
 
 
 def test_voice_approve_is_read_back_then_needs_yes(audit):
     at = _start(_app(), "ALERT_001")
-    at = _say(at, "zero approve")
+    at = _say(at, "z approve")
     text = _page_text(at)
     assert "Approve step 1 on ALERT_001?" in text
     assert _events(audit, "containment_decision") == []  # nothing yet
-    at = _say(at, "zero yes")
+    at = _say(at, "z yes")
     (line,) = _events(audit, "containment_decision")
     assert line["decision"] == "approve"
 
 
 def test_voice_no_cancels_the_read_back(audit):
     at = _start(_app(), "ALERT_001")
-    at = _say(at, "zero reject because not needed")
+    at = _say(at, "z reject because not needed")
     assert "Reject step 1 on ALERT_001" in _page_text(at)
-    at = _say(at, "zero no")
+    at = _say(at, "z no")
     assert _events(audit, "containment_decision") == []
     assert at.button(key="approve_0")  # still waiting on the step
 
 
 def test_voice_reject_with_reason_lands_in_the_audit_log(audit):
     at = _start(_app(), "ALERT_001")
-    at = _say(at, "zero reject step 1 because the user is traveling")
+    at = _say(at, "z reject step 1 because the user is traveling")
     at.button(key="voice_yes").click()
     at.run()
     (line,) = _events(audit, "containment_decision")
@@ -241,21 +242,21 @@ def test_voice_reject_with_reason_lands_in_the_audit_log(audit):
 
 def test_voice_approve_names_the_wrong_step_and_does_nothing(audit):
     at = _start(_app(), "ALERT_001")
-    at = _say(at, "zero approve step 2")
+    at = _say(at, "z approve step 2")
     assert "step 2" in _page_text(at).lower() and "on screen" in _page_text(at).lower()
     assert _events(audit, "containment_decision") == []
 
 
 def test_voice_answers_the_question(audit):
     at = _start(_app(), "ALERT_009")
-    at = _say(at, "zero expected")
+    at = _say(at, "z expected")
     (line,) = _events(audit, "ask_user")
     assert (line["status"], line["choice_index"]) == ("answered", 0)
 
 
 def test_voice_back_returns_to_the_queue(audit):
     at = _start(_app(), "ALERT_001")
-    at = _say(at, "zero back")
+    at = _say(at, "z back")
     assert "Identity incident queue" in _page_text(at)
     assert _statuses(at)["ALERT_001"] == "Waiting on you"
 

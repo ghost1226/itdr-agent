@@ -1,10 +1,12 @@
 """Voice commands for the GUI: wake word, a code parser, and the Whisper client.
 
 Nothing here calls a model. A transcript is a command only when it starts
-with the wake word (``zero``, Joe's pick 2026-10-21); after that a small,
+with the wake word (``z``, Joe's pick 2026-10-21, after ``zero`` kept being
+heard as a number; Whisper writes a spoken z as "Z", "Zee" or "Zed", all
+accepted); after that a small,
 fixed grammar maps the words to one action. Approve / reject / edit are never
 acted on straight from speech: the page reads the command back and waits for
-"zero yes" (or the Yes button), so a misheard word can't approve the wrong
+"z yes" (or the Yes button), so a misheard word can't approve the wrong
 thing. Audio goes to the local whisper.cpp server only (``WHISPER_URL``,
 default ``http://127.0.0.1:2022/v1/audio/transcriptions``); it never leaves
 the machine.
@@ -23,7 +25,8 @@ import httpx
 
 from .human import ANALYST_OPTIONS
 
-WAKE_WORD = "zero"
+WAKE_WORD = "z"
+WAKE_SPELLINGS = frozenset({"z", "zee", "zed"})  # how Whisper writes a spoken z
 DEFAULT_WHISPER_URL = "http://127.0.0.1:2022/v1/audio/transcriptions"
 TRANSCRIBE_TIMEOUT = 30.0
 
@@ -66,7 +69,7 @@ def strip_wake_word(text: str) -> str | None:
     words = normalize(text).split()
     if words and words[0] in ("hey", "ok", "okay", "hi"):
         words = words[1:]
-    if len(words) < 2 or words[0] != WAKE_WORD:
+    if len(words) < 2 or words[0] not in WAKE_SPELLINGS:
         return None  # no wake word, or the wake word alone: nothing to do
     return " ".join(words[1:])
 
