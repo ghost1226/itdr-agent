@@ -226,3 +226,17 @@ def test_cli_edit_both(monkeypatch):
     decision = CliReviewer().review_step(0, "Reset", "Restore old MFA")
     assert (decision.edited_step, decision.edited_rollback) == (
         "Reset MFA", "Re-register after ID check")
+
+
+# --- Review 2026-10-21 finding 7: end of input at the question ---------------
+
+
+def test_cli_reviewer_eof_at_the_question_raises_and_never_answers(monkeypatch):
+    from itdr_agent.human import CliReviewer, ReviewAbortedError
+
+    def end_of_input(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", end_of_input)
+    with pytest.raises(ReviewAbortedError):
+        CliReviewer().ask("Context?", [{"label": "a"}], True)

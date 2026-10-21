@@ -72,3 +72,32 @@ def test_timeout_reads_from_env(monkeypatch):
     from itdr_agent import config
     importlib.reload(config)
     assert config.TIMEOUT_SECONDS == 90
+
+
+# --- Review 2026-10-21 finding 6: pillow advisories in the GUI extra ---------
+# pip-audit on requirements-gui.txt reports 5 advisories on pillow 12.3.0,
+# fixed in 13.0.0, but every streamlit through 1.66.0 requires pillow<13.
+# So: pin the version we actually run, say why in the file, and trip when
+# streamlit finally allows 13 so the pin gets lifted.
+
+
+def _gui_requirements() -> str:
+    return (PROJECT_ROOT / "requirements-gui.txt").read_text(encoding="utf-8")
+
+
+def test_gui_requirements_pin_pillow_and_name_the_advisories():
+    text = _gui_requirements()
+    assert "pillow==12.3.0" in text
+    assert "GHSA-pchr-8j38-3x4p" in text  # the advisories are listed, not hidden
+    assert "pillow<13" in text  # the reason the pin is not 13.0.0
+
+
+def test_streamlit_still_blocks_pillow_13_otherwise_lift_the_pin():
+    """When this fails, streamlit allows pillow 13: bump the pin and drop the note."""
+    from importlib.metadata import requires
+
+    pillow = [r for r in requires("streamlit") or [] if r.lower().startswith("pillow")]
+    assert pillow and "<13" in pillow[0], (
+        "streamlit no longer pins pillow<13: set pillow==13.x in "
+        "requirements-gui.txt, re-run pip-audit, remove the advisory note"
+    )

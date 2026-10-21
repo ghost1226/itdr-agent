@@ -91,3 +91,30 @@ def test_investigator_script_no_longer_requires_openrouter_model(monkeypatch):
 def test_env_example_names_the_default():
     text = (PROJECT_ROOT / ".env.example").read_text()
     assert f"EVAL_MODEL={NEMOTRON}" in text
+
+
+# --- Review 2026-10-21 finding 7: the CLI reports an abort, no traceback -----
+
+
+def test_cli_prints_a_message_when_the_review_is_aborted(monkeypatch, capsys):
+    import itdr_agent.__main__ as cli
+    from itdr_agent import config
+    from itdr_agent.human import ReviewAbortedError
+
+    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "sk-or-v1-TEST")
+
+    class AbortingOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, alert):
+            raise ReviewAbortedError("input ended before an approve/edit/reject decision")
+
+    monkeypatch.setattr(cli, "_OpenRouterInvestigatorLLM", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cli, "_OpenRouterAdjudicatorLLM", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cli, "Investigator", lambda llm: llm)
+    monkeypatch.setattr(cli, "Adjudicator", lambda llm: llm)
+    monkeypatch.setattr(cli, "Orchestrator", AbortingOrchestrator)
+    assert cli.main(["--alert-id", "ALERT_001"]) == 3
+    out = capsys.readouterr().out
+    assert "aborted" in out.lower() and "input ended" in out

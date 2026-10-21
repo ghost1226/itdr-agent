@@ -716,3 +716,28 @@ def test_warning_tells_the_analyst_to_edit_the_rollback_or_reject():
 
     assert "Edit the rollback" in UNSAFE_ROLLBACK_WARNING
     assert "reject" in UNSAFE_ROLLBACK_WARNING.lower()
+
+
+# --- Review 2026-10-21 finding 7: an aborted review leaves an audit line -----
+
+
+class AbortingReviewer(ScriptedReviewer):
+    def ask(self, question, options=None, allow_free_text=True):
+        from itdr_agent.human import ReviewAbortedError
+
+        raise ReviewAbortedError("input ended before an answer")
+
+
+def test_review_abort_writes_an_aborted_audit_line(tmp_path):
+    from itdr_agent.human import ReviewAbortedError
+
+    low = _report(verdict="SUSPICIOUS", confidence=0.6, mitre_techniques_observed=[])
+    orch, _llm, audit = _orchestrator(
+        tmp_path, _dossier(alert_id="ALERT_009"), [low], reviewer=AbortingReviewer()
+    )
+    with pytest.raises(ReviewAbortedError):
+        orch.run({"id": "ALERT_009", "userPrincipalName": ALICE}, run_id="r-abort")
+    (line,) = [e for e in _audit(audit) if e["event"] == "aborted"]
+    assert line["run_id"] == "r-abort"
+    assert line["alert_id"] == "ALERT_009"
+    assert "input ended" in line["error"]
