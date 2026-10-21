@@ -8,7 +8,7 @@
 
 - **Current checkpoint:** Checkpoint 7 (live evaluation) is **complete** — all 7 checkpoints are done. The partner's half merged 2026-10-16 (`33c00f8`), `--combine` produced 30/30 runs in `eval/final/` (`0924fc3`), and README + `PROJECT_BRIEF.md` are finished.
 - **What's next:** voice + batch is built (4 steps below, Joe: "yes" to the plan); the real mic test with Joe is the last check. The 2026-10-21 full review (Joe's vault, "ITDR Full Review (2026-10-21)") found 10 items; fixes 1, 2, 6 and 7 are built (below). Joe picks the rest (3: one IP pool for all fixture addresses; 4: count pre-fetches and trace the guard's baseline calls; 5: measure the Adjudicator's input after the 168 h pre-fetch; 6: pillow 13 in requirements-gui.txt; 7-9: CLI ask() EOF, negation regex, doc drift). Then the live re-runs (ALERT_006 x3, ALERT_004 x3, ALERT_009, ALERT_010) once Nvidia's free endpoint is back (Joe: auto-start), then a second dream run.
-- **Newest commit when this block was written:** `73ac9c1` (this diary update is the commit that carries the block).
+- **Newest commit when this block was written:** `a6a2d0b` (this diary update is the commit that carries the block).
 
 ## What's Done
 
@@ -552,6 +552,8 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `b9aabd0` — voice-fix: PROGRESS.md lists f6b352a, f3a1eb3, 7fcf711
 - `79a29cf` — review-fix-6-7: red
 - `73ac9c1` — review-fix-6-7: green — pillow pin + tripwire; ask() EOF, aborted audit line, CLI exit 3
+- `33ed264` — review-fix-6-7: update PROGRESS.md
+- `a6a2d0b` — review-fix-6: six pillow advisories, suite count 539
 - `b6cadfe` — voice-batch-1-2: red — GUI named Countersign: Layer Zero; Back to queue keeps a waiting run; two waiting runs keep their own steps
 - `9dd783a` — voice-batch-1-2: green — GUI named Countersign: Layer Zero; runs kept by alert id so Back to queue parks a waiting run; queue status derived live; Open selected button
 - `34a48cd` — voice-batch-3: red — BatchRunner runs alerts one at a time and parks waiting runs; Run selected / Run all; live cost line
