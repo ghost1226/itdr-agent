@@ -612,3 +612,124 @@ def test_selected_alert_page_shows_the_alert_before_the_run(audit):
 def test_open_button_label_is_short(audit):
     at = _app()
     assert at.button(key="open_selected").label == "Open selected"
+
+
+# --- CP8: clickable nav + Audit log page ------------------------------------
+
+
+def _finish(at: AppTest, alert_id: str = "ALERT_001") -> AppTest:
+    """Start an offline run and approve its one step: a closed run on the page."""
+    at = _start(at, alert_id)
+    at.button(key="approve_0").click()
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+def _audit_table(at: AppTest):
+    frames = [df.value for df in at.dataframe]
+    assert frames, "no table on the audit page"
+    return frames[0]
+
+
+def _write_live_lines(audit: Path, lines: list[dict]) -> None:
+    live = audit.with_name("audit.jsonl")
+    live.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+def test_nav_audit_log_page_lists_both_files(audit):
+    at = _finish(_app())
+    _write_live_lines(audit, [{
+        "run_id": "ALERT_003_live", "event": "run", "timestamp": "2026-10-21T20:00:00+00:00",
+        "alert_id": "ALERT_003", "verdict": "SUSPICIOUS", "confidence": 0.7,
+    }])
+    at.button(key="nav_audit").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert "Audit log" in _page_text(at)
+    df = _audit_table(at)
+    assert list(df.columns) == ["Time", "Run", "Alert", "Event", "Verdict / decision", "Source"]
+    mock = df[df["Source"] == "mock"]
+    assert set(mock["Alert"]) == {"ALERT_001"}
+    assert {"run", "containment_decision"} <= set(mock["Event"])
+    decisions = set(mock["Verdict / decision"])
+    assert "approve" in decisions and any("COMPROMISED" in d for d in decisions)
+    live = df[df["Source"] == "live"]
+    assert list(live["Alert"]) == ["ALERT_003"]
+    assert list(live["Verdict / decision"])[0].startswith("SUSPICIOUS")
+
+
+def test_audit_log_filters_by_alert_and_event(audit):
+    _write_live_lines(audit, [
+        {"run_id": "r1", "event": "run", "timestamp": "2026-10-21T20:00:00+00:00",
+         "alert_id": "ALERT_001", "verdict": "COMPROMISED", "confidence": 0.9},
+        {"run_id": "r1", "event": "containment_decision", "timestamp": "2026-10-21T20:00:01+00:00",
+         "alert_id": "ALERT_001", "decision": "reject", "reason": "no"},
+        {"run_id": "r2", "event": "run", "timestamp": "2026-10-21T20:01:00+00:00",
+         "alert_id": "ALERT_002", "verdict": "FALSE_POSITIVE", "confidence": 0.8},
+    ])
+    at = _app()
+    at.button(key="nav_audit").click()
+    at.run()
+    assert len(_audit_table(at)) == 3
+    at.multiselect(key="audit_event").set_value(["run"])
+    at.run()
+    assert list(_audit_table(at)["Event"]) == ["run", "run"]
+    at.multiselect(key="audit_alert").set_value(["ALERT_002"])
+    at.run()
+    df = _audit_table(at)
+    assert len(df) == 1 and df["Alert"].iloc[0] == "ALERT_002"
+
+
+def test_this_run_only_from_the_report(audit):
+    _write_live_lines(audit, [{
+        "run_id": "other", "event": "run", "timestamp": "2026-10-21T20:00:00+00:00",
+        "alert_id": "ALERT_009", "verdict": "INSUFFICIENT_DATA", "confidence": 0.5,
+    }])
+    at = _finish(_app())
+    at.button(key="audit_this_run").click()
+    at.run()
+    assert not at.exception, at.exception
+    df = _audit_table(at)
+    assert len(set(df["Run"])) == 1 and "other" not in set(df["Run"])
+    assert "this run only" in _page_text(at)
+    at.button(key="audit_all_runs").click()
+    at.run()
+    assert "other" in set(_audit_table(at)["Run"])
+
+
+def test_nav_investigation_returns_to_the_open_run_and_queue_goes_home(audit):
+    at = _finish(_app())
+    at.button(key="nav_queue").click()
+    at.run()
+    assert list(_queue(at).columns) == ["Name", "Alert ID", "Severity", "Stage", "Status"]
+    assert "Incident note" not in _page_text(at)
+    at.button(key="nav_investigation").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert "Incident note" in _page_text(at)
+
+
+def test_audit_raw_json_is_behind_an_expander_as_code(audit):
+    at = _finish(_app())
+    at.button(key="nav_audit").click()
+    at.run()
+    run_id = _events(audit, "run")[0]["run_id"]
+    raw = [c.value for c in at.code if run_id in str(c.value)]
+    assert raw and '"event": "run"' in raw[0]
+
+
+def test_audit_log_skips_a_corrupt_line(audit):
+    live = audit.with_name("audit.jsonl")
+    live.write_text(
+        "this is not json\n"
+        + json.dumps({"run_id": "ok", "event": "run", "timestamp": "2026-10-21T20:00:00+00:00",
+                      "alert_id": "ALERT_004", "verdict": "SUSPICIOUS", "confidence": 0.6}) + "\n",
+        encoding="utf-8",
+    )
+    at = _app()
+    at.button(key="nav_audit").click()
+    at.run()
+    assert not at.exception, at.exception
+    assert list(_audit_table(at)["Run"]) == ["ok"]
+    assert "1 line skipped" in _page_text(at)
