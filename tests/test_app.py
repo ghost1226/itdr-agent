@@ -555,3 +555,23 @@ def test_review_screen_keeps_the_narrative_and_the_ticket(audit):
     assert "unlikely-travel" in text                  # the model's narrative, st.text
     assert "Alert: ALERT_001" in text                 # Joe's ticket lines
     assert "Action: Proposed, each step needs your approval below:" in text
+
+
+# --- GUI rebuild checkpoint 6: the queue in the same look ---------------------
+
+
+def test_queue_has_a_panel_header_not_a_page_title(audit):
+    at = _app()
+    assert at.title == []  # no 2.75rem H1 on the queue
+    text = _page_text(at)
+    assert "Identity incident queue" in text
+    assert "10 alerts" in text
+    assert "queue-table" in (PROJECT_ROOT / "app.py").read_text()  # styled table marker
+
+
+def test_queue_data_survives_the_styling(audit):
+    at = _app()
+    df = _queue(at)
+    assert list(df.columns) == ["Name", "Alert ID", "Severity", "Stage", "Status"]
+    assert len(df) == 10
+    assert df["Severity"].str.contains("High").sum() == 4
