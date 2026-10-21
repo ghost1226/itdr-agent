@@ -478,3 +478,31 @@ def test_live_cost_line_warns_when_run_all_will_not_fit_the_daily_cap(audit):
     text = _page_text(at)
     assert "10 alerts" in text and "60" in text and "100" in text and "50" in text
     assert any("daily" in str(w.value).lower() for w in at.warning)
+
+
+# --- GUI rebuild checkpoint 1: the Countersign look --------------------------
+
+
+def test_theme_uses_the_brand_colors():
+    import tomllib
+
+    config = tomllib.loads((PROJECT_ROOT / ".streamlit" / "config.toml").read_text())
+    theme = config["theme"]
+    assert theme["base"] == "dark"
+    assert theme["primaryColor"].upper() == "#F5A524"          # Signal, not red
+    assert theme["backgroundColor"].upper() == "#0B0F14"       # Night
+    assert theme["secondaryBackgroundColor"].upper() == "#121821"  # Panel
+    assert theme["textColor"].upper() == "#E6EDF3"
+    assert "IBM Plex Sans" in theme["font"]
+    assert "IBM Plex Mono" in theme["codeFont"]
+
+
+def test_header_strip_shows_the_brand_and_nav(audit):
+    at = _app()
+    text = _page_text(at)
+    assert "LAYER ZERO" in text
+    assert "Countersign" in text
+    assert "Queue" in text and "Investigation" in text and "Audit log" in text
+    assert "Offline demo" in text  # the mode pill
+    at = _start(at, "ALERT_001")
+    assert "LAYER ZERO" in _page_text(at)  # same header on the run page
