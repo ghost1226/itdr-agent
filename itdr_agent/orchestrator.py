@@ -43,7 +43,7 @@ from .adjudicator import (
     find_unsafe_rollbacks,
     is_unsafe_rollback,
 )
-from .human import ANALYST_OPTIONS, Reviewer
+from .human import ANALYST_OPTIONS, ReviewAbortedError, Reviewer
 from .investigator import InvestigationTimeoutError
 from .trace import RUNS_DIRNAME, RunTrace
 from .usage import TokenMeter
@@ -314,6 +314,19 @@ class Orchestrator:
             )
         except BaseException as exc:
             self._trace.record_error(exc)
+            if isinstance(exc, ReviewAbortedError):
+                # The analyst's input ended mid-review: nothing was approved,
+                # and the log says so (review 2026-10-21 finding 7).
+                self._append(
+                    run_id,
+                    {
+                        "event": "aborted",
+                        "timestamp": _now(),
+                        "alert_id": alert_id,
+                        "error": str(exc),
+                        **self._token_fields(),
+                    },
+                )
             raise
         finally:
             # Write the trace even when the run fails (timeout, MITRE

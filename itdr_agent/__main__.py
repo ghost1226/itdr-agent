@@ -16,7 +16,7 @@ from typing import Any
 from . import config
 from .adjudicator import DEFAULT_MODEL, Adjudicator
 from .fixture_store import get_store
-from .human import CliReviewer
+from .human import CliReviewer, ReviewAbortedError
 from .investigator import Investigator
 from .orchestrator import Orchestrator
 from .usage import TokenMeter, format_tokens
@@ -101,14 +101,19 @@ def main(argv: list[str] | None = None) -> int:
     adjudicator = Adjudicator(
         _OpenRouterAdjudicatorLLM(config.OPENROUTER_API_KEY, model, timeout, meter)
     )
-    result = Orchestrator(
-        investigator,
-        adjudicator,
-        CliReviewer(),
-        token_meter=meter,
-        model=model,
-        mode="live",
-    ).run(alerts[args.alert_id])
+    try:
+        result = Orchestrator(
+            investigator,
+            adjudicator,
+            CliReviewer(),
+            token_meter=meter,
+            model=model,
+            mode="live",
+        ).run(alerts[args.alert_id])
+    except ReviewAbortedError as exc:
+        print(f"Review aborted: {exc}. Nothing was approved; the run has an "
+              "'aborted' line in logs/audit.jsonl.")
+        return 3
     print(result.report.model_dump_json(indent=2))
     print(format_tokens(result.tokens))
     return 0

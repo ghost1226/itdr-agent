@@ -193,7 +193,10 @@ class CliReviewer:
         print(f"\n{question}")
         for index, option in enumerate(options or [], start=1):
             print(f"  {index}. {option.get('label', option)}")
-        raw = input("answer (blank to cancel): ").strip()
+        try:
+            raw = input("answer (blank to cancel): ").strip()
+        except EOFError as exc:  # review 2026-10-21 finding 7
+            raise ReviewAbortedError("input ended before an answer") from exc
         if not raw:
             return cancelled_result()
         return AskUserResult(
