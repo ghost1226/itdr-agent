@@ -196,7 +196,7 @@ pip-audit -r requirements.txt
 pip-audit -r requirements-gui.txt
 ```
 
-Result on 2026-10-21: `requirements.txt` **no known vulnerabilities** (pytest, pydantic, faker, python-dotenv, httpx, openai, tenacity, pip-audit). `requirements-gui.txt`: streamlit's dependency pillow 12.3.0 carries 5 advisories fixed in 13.0.0, but every streamlit through 1.66.0 requires `pillow<13`; accepted for now because the GUI binds to localhost and never opens an image, and a test trips the day streamlit allows 13 (see the note in `requirements-gui.txt`).
+Result on 2026-10-21: `requirements.txt` **no known vulnerabilities** (pytest, pydantic, faker, python-dotenv, httpx, openai, tenacity, pip-audit). `requirements-gui.txt`: streamlit's dependency pillow 12.3.0 carries 6 advisories fixed in 13.0.0, but every streamlit through 1.66.0 requires `pillow<13`; accepted for now because the GUI binds to localhost and never opens an image, and a test trips the day streamlit allows 13 (see the note in `requirements-gui.txt`).
 
 ## How we evaluated it
 

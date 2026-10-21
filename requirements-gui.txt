@@ -1,7 +1,8 @@
 # Optional: local web GUI (python -m streamlit run app.py). Not needed for the CLI or tests.
 streamlit==1.64.0
 # pillow is streamlit's dependency, pinned here so pip-audit sees what runs.
-# pip-audit (2026-10-21) lists 5 advisories on 12.3.0 (GHSA-pchr-8j38-3x4p,
+# pip-audit (2026-10-21) lists 6 advisories on 12.3.0 (GHSA-58r4-6rv3-gfh8,
+# GHSA-pchr-8j38-3x4p,
 # GHSA-q45j-58j2-45rg, GHSA-462x-pgg6-55fp, GHSA-c6hw-5grf-ff96,
 # GHSA-vx6w-vv9f-6gvg), all fixed in 13.0.0, but every streamlit through 1.66.0
 # requires pillow<13. Accepted for now: the GUI binds to localhost and never
