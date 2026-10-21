@@ -1,6 +1,6 @@
 # PROJECT_BRIEF: ITDR Identity Incident Builder
 
-**Status (2026-10-13): in progress.** Sections 1-7 and 9 are written; section 8 (Practical value) waits on the manual baseline. Sections follow PLAN.md ("PROJECT_BRIEF.md (After Checkpoint 7)"). Evaluation numbers are partial (12 of 30 runs) and will be refreshed from `eval/results.md` when the evaluation finishes.
+**Status (2026-10-21): complete.** All nine sections are written; the evaluation numbers are final (30 of 30 runs, `eval/final/results.md`, section 7) and section 8 carries Joe's manual baseline. Sections follow PLAN.md ("PROJECT_BRIEF.md (After Checkpoint 7)"). Code changes after the evaluation (the thin-evidence guard, the Dream Run 1 fixes, the 2026-10-21 review fixes) are noted where they touch a claim; the headline numbers are not re-scored until the next full evaluation.
 
 ## 1. Problem
 
@@ -17,7 +17,7 @@ The alert alone doesn't answer the analyst's real question: is this account comp
 ## 3. Why this is an agentic AI problem
 
 - **The evidence needed changes with the alert.** Impossible travel needs sign-in locations and devices; MFA fatigue needs the timing of MFA denials; a malicious app consent needs the audit log in order after a risky sign-in; an unknown user should stop early [P2, C5]. A fixed script either pulls everything every time or misses what a given alert needs.
-- **A single LLM call has no data.** It can't look anything up, so it would guess. The Investigator decides which of five simulated Graph tools to call, one step at a time, up to 8 calls, with a retry on errors [C6].
+- **A single LLM call has no data.** It can't look anything up, so it would guess. Code first pulls the profile and seven days of sign-ins and directory audits (three Graph calls, since Dream Run 1), then the Investigator decides which of five simulated Graph tools to call, one step at a time, up to 8 calls of its own, with a retry on errors [C6].
 - **Judgment and control are split.** The model reasons; code enforces the rules: MITRE claims must match evidence [T5], low confidence becomes INSUFFICIENT_DATA [C3], and a critical data gap skips the model entirely [C5].
 - **It knows when to ask.** On a low-confidence or INSUFFICIENT_DATA verdict, it asks the analyst one targeted question and re-checks once [C5]. A person approves, edits, or rejects every containment step [C5].
 
@@ -27,7 +27,7 @@ The alert alone doesn't answer the analyst's real question: is this account comp
 |---|---|
 | Primary users | Security operations and identity analysts triaging Entra ID risky sign-in alerts (section 2). |
 | Core problem | Turning one risky sign-in alert into a verdict, evidence, and reversible containment, quickly and accurately (section 1). |
-| Agent behaviour | Investigator gathers evidence with tools (up to 8 calls) [C6]; MITRE techniques are derived in code with the evidence ids [T3]; Adjudicator returns a structured report [C2]; orchestrator applies governance, asks the analyst when unsure, and runs the containment review [C5]. |
+| Agent behaviour | Investigator gathers evidence with tools (3 pre-fetched by code, then up to 8 of its own) [C6]; MITRE techniques are derived in code with the evidence ids [T3]; Adjudicator returns a structured report [C2]; orchestrator applies governance, asks the analyst when unsure, and runs the containment review [C5]. |
 | Inputs | One synthetic Entra ID alert, filtered to an allowlist of Graph-shaped fields and wrapped as untrusted data [T2, T4]. |
 | Outputs | Incident report: verdict (COMPROMISED, SUSPICIOUS, FALSE_POSITIVE, INSUFFICIENT_DATA), confidence, narrative, MITRE techniques, containment steps each with a rollback, recommended actions, audit notes [C7]; plus one audit log line per event [C5]. |
 | Constraints | Synthetic data only [A1]; free model [E1]; 120 seconds of machine time per run [C4]; the agent executes nothing, it only recommends [C2]; all data treated as untrusted [T4]. |
@@ -238,6 +238,6 @@ Section 7's and section 8's citations and claims are listed under each section.
 | Identity Risk Management Agent: preview, P2 + SCUs, up to 100 risky users per run, suggestions need manual admin approval, outputs a summary + recommended remediation | M4 |
 | Microsoft's Entra agents need SCUs | M3 |
 | Purview DLP Triage Agent: DLP alerts from 5 locations, Needs attention / Less urgent, SCUs, no simulation-mode policies, files up to 2 MB | M5 |
-| Investigator: 5 tools, up to 8 calls, retry once | C6 |
+| Investigator: 5 tools, 3 code pre-fetches, then up to 8 model-chosen calls, retry once; the thin-evidence guard adds 2 lookups | C6, P11 |
 | Critical gap skips the model; one question + one re-check; approve/edit/reject | C5 |
 | Report fields and verdict values | C7 |

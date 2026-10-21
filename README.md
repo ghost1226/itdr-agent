@@ -6,7 +6,7 @@ It runs on synthetic Entra ID data (fake `@contoso.com` tenant), not a real tena
 
 ## What it does
 
-1. **Investigator agent** (tool-calling loop): decides which of 5 simulated Microsoft Graph tools to call, up to 8 calls, retries a failed call once, then records the gap and keeps going. Dossier facts are copied from tool output, never written by the model. Risk indicators and MITRE techniques are derived in code, each tied to the evidence record it came from.
+1. **Investigator agent** (tool-calling loop): code first fetches the user's profile and seven days of sign-ins and directory audits, then the model decides which of 5 simulated Microsoft Graph tools to call, up to 8 calls of its own, retries a failed call once, then records the gap and keeps going. Dossier facts are copied from tool output, never written by the model. Risk indicators and MITRE techniques are derived in code, each tied to the evidence record it came from.
 2. **Adjudicator agent** (one structured call): reads the dossier and returns the verdict, confidence, narrative, MITRE techniques, and containment steps with rollbacks.
 3. **Orchestrator**: runs the two agents with the guardrails below and puts a human in charge of the outcome.
 
@@ -57,7 +57,7 @@ The 10 alerts: 5 attacks (impossible travel, MFA fatigue, anonymous IP, app cons
 pytest
 ```
 
-527 tests, no network, no API key needed. The model is mocked in every unit test.
+550 tests, no network, no API key needed. The model is mocked in every unit test.
 
 ## Run the demo
 
@@ -143,25 +143,31 @@ The full pipeline is `python -m itdr_agent` (above) or the evaluation (below).
  anonymization gate  -- stops if any email domain isn't the synthetic tenant's
    |
    v
- INVESTIGATOR (tool loop, max 8 calls, retry once)
-   |  tools: get_user_profile, get_sign_in_history, get_device_trust,
-   |         get_directory_audits, get_risky_user_report
-   |  -> dossier: facts from tool output, MITRE derived in code with evidence ids
+ code pre-fetch: profile, 7 days of sign-ins, 7 days of directory audits
+   |
    v
  critical gap? (no profile or no sign-ins) --yes--> INSUFFICIENT_DATA, no model call
    | no
    v
+ INVESTIGATOR (tool loop, up to 8 calls of its own, retry once)
+   |  tools: get_user_profile, get_sign_in_history, get_device_trust,
+   |         get_directory_audits, get_risky_user_report
+   |  -> dossier: facts from tool output, MITRE derived in code with evidence ids
+   v
  ADJUDICATOR (one structured call)
    |  -> verdict, confidence, narrative, MITRE, containment steps + rollbacks
    v
- code guards: confidence coercion, MITRE claim check, action-claim flag,
-              unsafe-rollback flag
+ code guards: IP-range flag, confidence coercion, thin-evidence guard (its own
+              7-day lookup), standard rollbacks, no containment on benign /
+              unknown verdicts, action-claim flag, unsafe-rollback flag,
+              MITRE claim check
    |
    v
  INSUFFICIENT_DATA or confidence < 0.7? --yes--> ask the analyst ONE question
+   |                      (built by code: thin baseline / new country / default)
    |                                             -> at most one re-adjudication
    v
- HUMAN REVIEW: approve / edit / reject each containment step
+ HUMAN REVIEW: approve / edit / reject each containment step (click or voice)
    |
    v
  report + logs/audit.jsonl (every step, with a run id)
@@ -174,7 +180,10 @@ The full pipeline is `python -m itdr_agent` (above) or the evaluation (below).
 - **No answer key in the model's path.** Alerts pass through a field allowlist; labels live in a separate file the agents never read.
 - **No invented evidence.** Dossier facts come from tool output. Any MITRE technique the Adjudicator claims that isn't backed by evidence in the dossier is rejected in code.
 - **No fake certainty.** Any verdict below 0.7 confidence is changed to INSUFFICIENT_DATA in code, and the analyst gets one question.
-- **Hard limits.** 8 tool calls, retry once, a 90-second cap per request, and a 120-second total per investigation.
+- **Hard limits.** 3 code pre-fetches, then 8 model-chosen tool calls, retry once, a 90-second cap per request, and a 120-second total per investigation. The audit line counts the model's calls, the pre-fetches and the guard's lookups separately.
+- **No benign verdict on thin evidence.** A FALSE_POSITIVE with fewer than 3 sign-ins and no audits in the user's last 7 days (the thin-evidence guard counts them itself) becomes INSUFFICIENT_DATA and the analyst is asked; only an answer that supplies context switches the guard off.
+- **No containment on benign or unknown verdicts.** Steps on a FALSE_POSITIVE or INSUFFICIENT_DATA move to recommended actions; a known one-way step (password reset, MFA re-register, session revoke) gets a standard safe rollback first, and any undo still unsafe is marked in the text.
+- **An IP's address range is never evidence.** Reasoning that leans on a test, documentation or reserved range is flagged and logged.
 - **Flags, never silent fixes.** Wording that claims a step was already executed, and rollbacks that would restore an old password or MFA setup, are flagged, shown as a warning to the reviewer, and logged. The verdict is left alone.
 - **Synthetic data only.** No real tenant, users, or credentials.
 

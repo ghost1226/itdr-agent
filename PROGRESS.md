@@ -376,7 +376,6 @@ Standing prevention rules distilled from the above:
 7. **Free tier makes the eval slow:** ~8 requests/run, 45/day with worst-case reservation → ~6 days for 30 runs ($10 of credits would make it one day).
 
 12. **Thin-data threshold picked knowing the test data (2026-10-16).** `MIN_BASELINE_SIGN_INS = 3` matches the generator's thin_data (1-2 sign-ins); ALERT_006 has exactly 3. Judgment call, not measured.
-14. **Investigator skips needed tools** — ALERT_004 runs 1-2 and ALERT_007 run 3 never fetched directory audits (3 of 30 eval runs). Fix planned: Dream Run 1 fix 5 (code pre-fetches profile, sign-ins, directory audits).
 15. **Shared test dossier is thin (2026-10-16).** 1 sign-in, no audits; one test adjusted to 3 sign-ins in `d12a110`.
 16. **Output tokens not fully explained (2026-10-16).** Likely hidden reasoning; unverified.
 17. **Eval records have no code version (2026-10-16).** `raw.jsonl` lacks a commit hash.

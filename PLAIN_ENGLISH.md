@@ -48,7 +48,7 @@ These simulate what a real analyst would pull from Microsoft's Graph API. We bui
 
 We intentionally create fake scenarios that match real hacker techniques (called MITRE ATT&CK patterns):
 
-1. **Impossible travel** — User logs in from New York and Moscow 10 minutes apart. Physically impossible.
+1. **Impossible travel** — User logs in from New York and Moscow 25 minutes apart. Physically impossible.
 2. **MFA fatigue** — Attacker spams login prompts until the user clicks "approve" just to make it stop.
 3. **Anonymous IP / proxy** — Login comes from a known VPN or Tor node used to hide location.
 4. **App consent after foreign sign-in** — Right after a suspicious login, the account approves a new app to access email/files.
