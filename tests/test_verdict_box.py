@@ -317,3 +317,27 @@ def test_run_page_cards_on_a_closed_run(tmp_path, monkeypatch):
     assert "INSUFFICIENT_DATA" in text
     assert "Closed" in text
     assert "No technique proved" in text
+
+
+# --- GUI rebuild checkpoint 7: evidence you can read, not GUIDs --------------
+
+
+def test_evidence_detail_describes_sign_ins_and_audits():
+    from itdr_agent.summary import evidence_detail
+
+    sign_in = {"id": "s1", "createdDateTime": "2025-01-15T09:00:00Z",
+               "appDisplayName": "Microsoft Teams",
+               "location": {"city": "New York", "countryOrRegion": "US"},
+               "deviceDetail": {"displayName": "LAPTOP-1", "operatingSystem": "iOS"},
+               "ipAddress": "203.0.113.10"}
+    audit = {"id": "a1", "activityDateTime": "2025-01-15T10:00:00Z",
+             "activityDisplayName": "Add member to role",
+             "targetResources": [{"type": "Role", "displayName": "Global Administrator"}]}
+    dossier = _dossier(sign_in_history=[sign_in], directory_audits=[audit],
+                       mitre_attack_evidence={"T1078.004": ["s1"], "T1098.003": ["a1"]})
+    lines = evidence_detail(dossier, "T1078.004")
+    assert lines == ["2025-01-15 09:00Z · Microsoft Teams · New York, US · LAPTOP-1 (iOS) · s1"]
+    assert evidence_detail(dossier, "T1098.003") == [
+        "2025-01-15 10:00Z · Add member to role · Global Administrator · a1"]
+    assert evidence_detail(dossier, "T9999") == []
+    assert "203.0.113.10" not in " ".join(lines)

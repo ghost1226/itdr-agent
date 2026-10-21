@@ -576,3 +576,39 @@ def test_queue_data_survives_the_styling(audit):
     assert list(df.columns) == ["Name", "Alert ID", "Severity", "Stage", "Status"]
     assert len(df) == 10
     assert df["Severity"].str.contains("High").sum() == 4
+
+
+# --- GUI rebuild checkpoint 7: the report, the audit expander, the alert first
+
+
+def test_report_reads_the_evidence_and_tucks_the_audit_trail_away(audit):
+    at = _start(_app(), "ALERT_001")
+    at.button(key="approve_0").click()
+    at.run()
+    assert not at.exception, at.exception
+    text = _page_text(at)
+    assert "T1078.004" in text
+    assert "New York, US" in text and "Moscow, RU" in text  # the evidence, readable
+    assert "Alert: ALERT_001" in text                        # the incident note
+    assert "Closed" in text
+    labels = [str(e.label) for e in at.expander]
+    assert any("Audit trail" in l for l in labels)
+    assert any("Dossier" in l for l in labels)
+
+
+def test_selected_alert_page_shows_the_alert_before_the_run(audit):
+    at = _app()
+    at.session_state["queue"] = {"selection": {"rows": [0], "columns": [], "cells": []}}
+    at.run()
+    at.button(key="open_selected").click()
+    at.run()
+    text = _page_text(at)
+    assert "ALERT_001" in text and "Unlikely travel" in text
+    assert "Risk: high" in text
+    assert "Run investigation" in text
+    assert "203.0.113" not in text
+
+
+def test_open_button_label_is_short(audit):
+    at = _app()
+    assert at.button(key="open_selected").label == "Open selected"
