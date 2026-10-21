@@ -150,8 +150,10 @@ def test_trace_records_tool_calls_in_order_with_rows(tmp_path):
         "get_directory_audits",
         "get_user_profile",
         "get_sign_in_history",
+        "baseline:get_sign_in_history",   # the guard's own lookups, last
+        "baseline:get_directory_audits",
     ]
-    assert [call["rows"] for call in calls] == [1, 2, 0, 1, 2]
+    assert [call["rows"] for call in calls][:5] == [1, 2, 0, 1, 2]
     assert all("rows" in call for call in calls)
 
 

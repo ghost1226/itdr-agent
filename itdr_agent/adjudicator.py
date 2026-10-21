@@ -135,6 +135,12 @@ _UNSAFE_ROLLBACK_PATTERNS = [
 _RB_NEGATION = re.compile(
     r"\b(?:not|never|don't|dont|avoid|without)\s+(?:\w+\s+){0,2}$", re.IGNORECASE
 )
+# Review 2026-10-21 finding 8: "Do not, under any circumstances, restore the
+# old password" and "Restore access but never the previous password" were
+# flagged. A plain negation anywhere earlier in the clause, or inside the
+# matched phrase, makes it safe; "without" keeps the 3-word window above,
+# because "Without verifying, restore the old password" negates the verifying.
+_RB_NEGATION_ANYWHERE = re.compile(r"\b(?:not|never|don't|dont|avoid|no)\b", re.IGNORECASE)
 
 # Known one-way steps get a standard safe rollback from code when the model's
 # rollback is unsafe; a step code doesn't recognize keeps the warning.
@@ -431,8 +437,13 @@ def is_unsafe_rollback(text: str) -> bool:
     for pattern in _UNSAFE_ROLLBACK_PATTERNS:
         for match in pattern.finditer(text):
             clause = _SENTENCE_BREAK.split(text[: match.start()])[-1]
-            if not _RB_NEGATION.search(clause):
-                return True
+            if _RB_NEGATION.search(clause):
+                continue
+            if _RB_NEGATION_ANYWHERE.search(clause):
+                continue
+            if _RB_NEGATION_ANYWHERE.search(match.group(0)):
+                continue
+            return True
     return False
 
 
@@ -512,6 +523,9 @@ class Adjudicator:
     ) -> None:
         self.llm = llm
         self.baseline = baseline
+        # Graph calls the guard made this run (2 per adjudication); the
+        # orchestrator resets it and writes it to the run line.
+        self.baseline_calls = 0
         # Set per run by the orchestrator; None = no trace file.
         self.trace: Any | None = None
 
@@ -526,9 +540,14 @@ class Adjudicator:
         report = parse_adjudicator_output(raw)
         report = apply_ip_range_guard(report)  # before any guard writes notes
         report = apply_confidence_guardrail(report)
-        baseline = (
-            self.baseline(dossier.user_principal_name) if self.baseline else None
-        )
+        baseline = None
+        if self.baseline:
+            baseline = self.baseline(dossier.user_principal_name)
+            self.baseline_calls += 2
+            if self.trace is not None:
+                self.trace.record_baseline(
+                    dossier.user_principal_name, BASELINE_HOURS, baseline
+                )
         report = apply_thin_evidence_guard(report, dossier, baseline)
         # Standard rollbacks go in before the move, so a one-way step that
         # leaves a benign verdict carries a safe undo (finding 2).

@@ -160,6 +160,9 @@ class Investigator:
         self.max_tool_calls = max_tool_calls
         self._execute_tool = tool_executor or call_tool
         self.tool_calls_made = 0
+        # Graph calls made by code before the model's loop (incl. retries);
+        # counted apart from the model's own calls (review 2026-10-21, 4).
+        self.prefetch_calls = 0
         # Set per run by the orchestrator (total timeout); None = no deadline.
         self.deadline: float | None = None
         self.clock: Callable[[], float] = time.monotonic
@@ -170,6 +173,7 @@ class Investigator:
 
     def investigate(self, alert: dict[str, Any]) -> InvestigatorOutput:
         self.tool_calls_made = 0
+        self.prefetch_calls = 0
         upn = alert.get("userPrincipalName", "")
         evidence: dict[str, Any] = {
             "user_profile": None,
@@ -329,9 +333,11 @@ class Investigator:
         self, name: str, arguments: dict[str, Any], data_gaps: list[str]
     ) -> Any:
         """Run a pre-fetch with the same retry-once policy, off the cap."""
+        self.prefetch_calls += 1
         try:
             return self._run_tool(name, arguments)
         except SimulatedGraphError:
+            self.prefetch_calls += 1
             try:
                 return self._run_tool(name, arguments)
             except SimulatedGraphError as second:

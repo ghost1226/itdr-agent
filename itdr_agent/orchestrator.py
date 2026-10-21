@@ -242,6 +242,8 @@ class Orchestrator:
         for target in (self.investigator, self.adjudicator):
             if hasattr(target, "trace"):
                 target.trace = self._trace
+        if hasattr(self.adjudicator, "baseline_calls"):
+            self.adjudicator.baseline_calls = 0
 
         dossier: InvestigatorOutput | None = None
         report: AdjudicatorOutput | None = None
@@ -283,7 +285,9 @@ class Orchestrator:
                     "event": "run",
                     "timestamp": _now(),
                     "alert_id": alert_id,
-                    "tool_calls": tool_calls,
+                    "tool_calls": tool_calls,  # the model's own calls
+                    "prefetch_calls": getattr(self.investigator, "prefetch_calls", 0),
+                    "baseline_calls": getattr(self.adjudicator, "baseline_calls", 0),
                     "dossier_hash": _sha256(dossier.model_dump_json()),
                     "report_hash": _sha256(report.model_dump_json()),
                     "verdict": report.verdict.value,

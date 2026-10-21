@@ -57,6 +57,15 @@ class RunTrace:
             }
         )
 
+    def record_baseline(self, upn: str, hours: int, counts: tuple[int, int]) -> None:
+        """The thin-evidence guard's own two Graph lookups (review 2026-10-21, 4)."""
+        for name, rows in zip(
+            ("baseline:get_sign_in_history", "baseline:get_directory_audits"), counts
+        ):
+            self.tool_calls.append(
+                {"name": name, "arguments": {"upn": upn, "hours": hours}, "rows": rows}
+            )
+
     def record_error(self, exc: BaseException) -> None:
         """The run failed; keep the exception class name in the trace."""
         self.error = type(exc).__name__

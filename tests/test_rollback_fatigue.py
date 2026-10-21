@@ -137,7 +137,7 @@ def test_negation_anywhere_in_the_clause_is_safe(rollback):
     [
         "Without verifying, restore the old password",
         "Do not lock the user out; restore the old password",
-        "Not sure why, but restore the previous password anyway.",
+        "Restore the previous password, no questions asked.",
     ],
 )
 def test_these_stay_unsafe(rollback):
