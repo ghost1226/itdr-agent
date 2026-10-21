@@ -49,10 +49,13 @@ from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E402
 from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
 from itdr_agent.summary import (  # noqa: E402
+    alert_line,
+    blast_radius,
     incident_note,
     severity,
     short_summary,
     stage,
+    technique_card,
     ticket_lines,
     verdict_line,
     what,
@@ -485,6 +488,14 @@ def _brand_css() -> None:
         f".cs-pill {{ display:flex; align-items:center; gap:10px; font-family:'IBM Plex Mono', monospace; font-size:13px; color:{MUTED}; }}"
         ".cs-pill i { width:8px; height:8px; border-radius:50%; display:inline-block; }"
         f".cs-chip {{ font-family:'IBM Plex Mono', monospace; font-size:12px; padding:3px 8px; border-radius:6px; background:#1A2230; color:{TEXT}; }}"
+        f".cs-alert {{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-family:'IBM Plex Mono', monospace; font-size:13px; color:{MUTED}; margin:6px 0 4px; }}"
+        f".cs-risk {{ padding:3px 8px; border-radius:6px; border:1px solid #5A4520; color:{SIGNAL}; }}"
+        f".cs-h1 {{ font-size:26px; font-weight:600; line-height:1.3; margin:4px 0 14px; color:{TEXT}; }}"
+        ".cs-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin:0 0 18px; }"
+        f".cs-card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:12px; padding:16px 18px; display:flex; flex-direction:column; gap:6px; }}"
+        f".cs-card .lbl {{ font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.12em; color:{MUTED}; }}"
+        ".cs-card .val { font-size:26px; font-weight:700; line-height:1.2; }"
+        f".cs-card .det {{ font-size:14px; color:{MUTED}; }}"
         "</style>",
         unsafe_allow_html=True,
     )
@@ -808,23 +819,89 @@ def _back_to_queue() -> bool:
     return st.button("Back to queue", key="back_to_queue")
 
 
-def _what_happened(run: GuiRun) -> None:
-    """Code-built summary, right below the alert line once there is a verdict."""
+def _report_and_dossier(run: GuiRun):
     if run.result is not None:
-        report, dossier = run.result.report, run.result.dossier
+        return run.result.report, run.result.dossier
+    return run.shown_report, run.shown_dossier
+
+
+def _alert_header(run: GuiRun) -> None:
+    """The alert chip line and the code-built headline (never an IP)."""
+    alert = run.alert
+    risk = str(alert.get("riskLevelAggregated") or "none").lower()
+    st.markdown(
+        f'<div class="cs-alert"><span class="cs-chip">{html.escape(alert.get("id", ""))}</span>'
+        f"<span>{html.escape(alert_line(alert))}</span>"
+        f'<span class="cs-risk">Risk: {html.escape(risk)}</span></div>',
+        unsafe_allow_html=True,
+    )
+    report, dossier = _report_and_dossier(run)
+    headline = (
+        what_happened(alert, report, dossier)
+        if report is not None
+        else f"{alert.get('userPrincipalName', '')}: investigation in progress."
+    )
+    st.markdown(f'<h1 class="cs-h1">{html.escape(headline)}</h1>', unsafe_allow_html=True)
+
+
+def _card(label: str, value: str, detail: str, color: str = TEXT) -> str:
+    return (
+        f'<div class="cs-card"><span class="lbl">{html.escape(label)}</span>'
+        f'<span class="val" style="color:{color}">{html.escape(value)}</span>'
+        f'<span class="det">{html.escape(detail)}</span></div>'
+    )
+
+
+VERDICT_COLORS = {
+    "COMPROMISED": THREAT, "SUSPICIOUS": THREAT,
+    "FALSE_POSITIVE": BENIGN, "INSUFFICIENT_DATA": SIGNAL,
+}
+
+
+def _status_card(run: GuiRun, status: str, report) -> tuple[str, str, str]:
+    if status == "review" and run.pending:
+        left = len(report.containment_steps) - run.pending["index"] if report else 1
+        return ("Waiting on you", f"{left} step{'s' if left != 1 else ''} need{'' if left != 1 else 's'} your countersign", BENIGN)
+    if status == "question":
+        return ("Waiting on you", "1 question for you", BENIGN)
+    if status == "done":
+        return ("Closed", f"verdict {report.verdict.value}" if report else "finished", MUTED)
+    if status == "error":
+        return ("Error", (run.error or "the run stopped")[:70], THREAT)
+    if status == "idle":
+        return ("Queued", "waiting for its turn in the batch", MUTED)
+    return ("Investigating", "the agent is gathering evidence", SIGNAL)
+
+
+def _cards(run: GuiRun, status: str) -> None:
+    """Verdict / Technique / Blast radius / Status, all from code-owned fields."""
+    report, dossier = _report_and_dossier(run)
+    if report is not None:
+        verdict = report.verdict.value
+        verdict_card = _card(
+            "VERDICT", verdict,
+            f"Confidence {report.confidence:.2f} · threshold 0.70",
+            VERDICT_COLORS.get(verdict, TEXT),
+        )
+        tid, tname, tdetail = technique_card(report, dossier)
+        technique = _card("TECHNIQUE", tid, f"{tname} · {tdetail}")
     else:
-        report, dossier = run.shown_report, run.shown_dossier
-    if report is None:
-        return
-    st.markdown("**What happened:**")
-    st.text(what_happened(run.alert, report, dossier))
+        verdict_card = _card("VERDICT", "—", "pending", MUTED)
+        technique = _card("TECHNIQUE", "—", "pending", MUTED)
+    label, detail = blast_radius(dossier) if dossier is not None else ("—", "pending")
+    radius = _card("BLAST RADIUS", label, detail, SIGNAL if label != "Account" else TEXT)
+    s_label, s_detail, s_color = _status_card(run, status, report)
+    st.markdown(
+        '<div class="cs-cards">' + verdict_card + technique + radius
+        + _card("STATUS", s_label, s_detail, s_color) + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _run_page(run: GuiRun) -> None:
-    st.caption(f"Alert {run.alert['id']} for {run.alert['userPrincipalName']}")
-    st.text(short_summary(run.alert))
     status = run.wait(POLL_SECONDS)  # first, so a finished run shows its summary
-    _what_happened(run)
+    _alert_header(run)
+    _cards(run, status)
     if _back_to_queue():
         # The run stays in session_state["runs"]; its thread keeps waiting.
         st.session_state.pop("open", None)

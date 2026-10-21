@@ -176,7 +176,7 @@ def test_gui_box_shows_summary_narrative_and_ticket(tmp_path, monkeypatch):
     monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     at = _start(_app(), "ALERT_001")  # offline: waits on the first review step
     text = _page_text(at)
-    assert "What happened:" in text
+    assert 'class="cs-h1"' in text  # the code-built headline
     assert "had " in text and "sign-ins in the window" in text
     assert "Alert: ALERT_001" in text
     assert "What: Unlikely travel involving one user" in text
@@ -211,11 +211,13 @@ def test_what_happened_sits_right_below_the_alert_line(tmp_path, monkeypatch):
     monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     at = _start(_app(), "ALERT_001")
     items = _in_order(at)
-    line = _index(items, "ALERT_001 · ")
-    assert items[line + 1] == ("markdown", "**What happened:**")
-    assert items[line + 2][1].startswith("alice.traveler@contoso.com had ")
+    line = next(i for i, (_t, v) in enumerate(items) if 'class="cs-alert"' in v)
+    assert "ALERT_001" in items[line][1]
+    assert 'class="cs-h1"' in items[line + 1][1]
+    assert "alice.traveler@contoso.com had " in items[line + 1][1]
+    assert 'class="cs-cards"' in items[line + 2][1]
     assert _index(items, "**Verdict:") > line + 2
-    assert [v for _t, v in items].count("**What happened:**") == 1
+    assert sum('class="cs-h1"' in v for _t, v in items) == 1
 
 
 def test_what_happened_stays_on_the_report(tmp_path, monkeypatch):
@@ -225,8 +227,9 @@ def test_what_happened_stays_on_the_report(tmp_path, monkeypatch):
     monkeypatch.setenv("ITDR_GUI_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     at = _start(_app(), "ALERT_010")  # short-circuits straight to the report
     items = _in_order(at)
-    line = _index(items, "ALERT_010 · ")
-    assert items[line + 1] == ("markdown", "**What happened:**")
+    line = next(i for i, (_t, v) in enumerate(items) if 'class="cs-alert"' in v)
+    assert "ALERT_010" in items[line][1]
+    assert 'class="cs-h1"' in items[line + 1][1]
 
 
 # --- GUI rebuild checkpoint 2: the four cards, code-built ---------------------

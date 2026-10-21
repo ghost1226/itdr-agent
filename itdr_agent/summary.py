@@ -42,6 +42,15 @@ CONCLUSIONS: dict[str, str] = {
 }
 
 
+# MITRE names (attack.mitre.org, confirmed in PROGRESS.md's checklist).
+TECHNIQUE_NAMES: dict[str, str] = {
+    "T1078.004": "Valid Accounts: Cloud Accounts",
+    "T1621": "MFA Request Generation",
+    "T1090.003": "Proxy: Multi-hop Proxy",
+    "T1528": "Steal Application Access Token",
+    "T1098.003": "Account Manipulation: Additional Cloud Roles",
+}
+
 # MITRE techniques the Investigator proved from evidence, in plain words.
 TECHNIQUE_WORDS: dict[str, str] = {
     "T1078.004": "Unlikely travel",
@@ -277,3 +286,72 @@ def report_summary_lines(report: Any, dossier: Any) -> list[str]:
     else:
         lines.append("  none")
     return lines
+
+
+# --- GUI rebuild checkpoint 2: the alert line and the four cards ------------
+
+
+def _short_what(alert: dict[str, Any]) -> str:
+    if alert.get("riskEventTypes_v2"):
+        return what(alert)
+    code = (alert.get("status") or {}).get("errorCode", 0)
+    if code == 500121:
+        return "MFA denied"
+    if code:
+        return "Sign-in failed"
+    return "Sign-in flagged"
+
+
+def alert_line(alert: dict[str, Any]) -> str:
+    """One mono line under the alert chip: what · app · place · time. No IP."""
+    when = (alert.get("createdDateTime") or "").replace("T", " ")
+    when = when[:16] + "Z" if len(when) >= 16 else when
+    return " · ".join(
+        part for part in (
+            _short_what(alert), alert.get("appDisplayName") or "", _place(alert), when
+        ) if part
+    )
+
+
+def technique_card(report: Any, dossier: Any) -> tuple[str, str, str]:
+    """(id, name, detail) for the Technique card; the first proved technique."""
+    techniques = list(getattr(report, "mitre_techniques_observed", None) or [])
+    if not techniques:
+        return ("None", "No technique proved", "no evidence-backed pattern")
+    first = techniques[0]
+    evidence = (getattr(dossier, "mitre_attack_evidence", None) or {}).get(first, [])
+    detail = f"tied to {_plural(len(evidence), 'record')}"
+    if len(techniques) > 1:
+        detail += f" · +{len(techniques) - 1} more"
+    return (first, TECHNIQUE_NAMES.get(first, first), detail)
+
+
+def blast_radius(dossier: Any) -> tuple[str, str]:
+    """(label, detail): how far the evidence reaches, from the audits in code.
+
+    Account = nothing beyond the sign-ins; Apps = an app consent on the user;
+    Roles = a role added TO the user (a role the user granted to someone else
+    is not their blast radius).
+    """
+    upn = getattr(dossier, "user_principal_name", "")
+    roles: list[str] = []
+    apps: list[str] = []
+    for audit in getattr(dossier, "directory_audits", None) or []:
+        targets = audit.get("targetResources") or []
+        is_target = any(
+            t.get("type") == "User" and t.get("userPrincipalName") == upn for t in targets
+        )
+        if not is_target:
+            continue
+        activity = audit.get("activityDisplayName")
+        if activity == "Add member to role":
+            roles += [t.get("displayName", "a role") for t in targets if t.get("type") == "Role"]
+        elif activity == "Consent to application":
+            apps += [t.get("displayName", "an app") for t in targets if t.get("type") == "Application"]
+    parts = []
+    if roles:
+        parts.append(f"{_plural(len(roles), 'role')} added: {', '.join(roles)}")
+    if apps:
+        parts.append(f"{_plural(len(apps), 'app consent')}: {', '.join(apps)}")
+    label = "Roles" if roles else "Apps" if apps else "Account"
+    return (label, "; ".join(parts) if parts else "No role, app or consent changes found")
