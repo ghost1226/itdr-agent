@@ -192,3 +192,96 @@ def test_model_cannot_set_the_baseline_counts():
     assert report.baseline_sign_ins == 2
     assert report.baseline_directory_audits == 0
     assert report.verdict is Verdict.INSUFFICIENT_DATA
+
+
+# --- Review 2026-10-21 finding 1: "I don't know" is not context ------------
+# The guard was skipped once any answer had status "answered", and the
+# question's third option is "I don't know". An analyst picking it (or
+# "suspicious") supplies no baseline, so the guard must stay on; only the
+# "expected/benign" option or typed context switches it off.
+
+
+def _choice(label: str, index: int) -> AskUserResult:
+    return AskUserResult(status="answered", answer=label, choice_index=index,
+                         free_text=False)
+
+
+def _typed(text: str) -> AskUserResult:
+    return AskUserResult(status="answered", answer=text, choice_index=None,
+                         free_text=True)
+
+
+def _run_thin_with(tmp_path, answer):
+    orch, llm, audit = _orchestrator(
+        tmp_path, _thin(), [_report(**BENIGN), _report(**BENIGN)],
+        reviewer=ScriptedReviewer(answers=[answer]),
+    )
+    result = orch.run({"id": "ALERT_009"})
+    return result, llm, audit
+
+
+def test_i_dont_know_keeps_the_guard_on(tmp_path):
+    from itdr_agent.human import NO_CONTEXT_ANSWER
+
+    result, llm, _ = _run_thin_with(tmp_path, _choice(NO_CONTEXT_ANSWER, 2))
+    assert llm.calls == 2  # the re-adjudication still ran
+    assert result.report.verdict is Verdict.INSUFFICIENT_DATA
+    assert result.report.thin_evidence is True
+    assert result.report.model_verdict == "FALSE_POSITIVE"
+
+
+def test_suspicious_answer_keeps_the_guard_on(tmp_path):
+    from itdr_agent.human import ANALYST_OPTIONS
+
+    result, _llm, _ = _run_thin_with(tmp_path, _choice(ANALYST_OPTIONS[1], 1))
+    assert result.report.verdict is Verdict.INSUFFICIENT_DATA
+    assert result.report.thin_evidence is True
+
+
+def test_typed_i_dont_know_is_not_context(tmp_path):
+    result, _llm, _ = _run_thin_with(tmp_path, _typed("  I don't know "))
+    assert result.report.verdict is Verdict.INSUFFICIENT_DATA
+
+
+def test_typed_context_switches_the_guard_off(tmp_path):
+    result, _llm, _ = _run_thin_with(
+        tmp_path, _typed("She started last week; both sign-ins are hers")
+    )
+    assert result.report.verdict is Verdict.FALSE_POSITIVE
+    assert result.report.thin_evidence is False
+
+
+def test_supplies_context_contract():
+    from itdr_agent.human import (
+        ANALYST_OPTIONS,
+        NO_CONTEXT_ANSWER,
+        cancelled_result,
+        supplies_context,
+    )
+
+    assert ANALYST_OPTIONS[2] == NO_CONTEXT_ANSWER == "I don't know"
+    assert supplies_context(_choice(ANALYST_OPTIONS[0], 0)) is True
+    assert supplies_context(_choice(ANALYST_OPTIONS[1], 1)) is False
+    assert supplies_context(_choice(NO_CONTEXT_ANSWER, 2)) is False
+    assert supplies_context(_typed("on leave this week")) is True
+    assert supplies_context(_typed("i don't know")) is False
+    assert supplies_context(cancelled_result()) is False
+
+
+def test_question_options_come_from_the_shared_constant(tmp_path):
+    from itdr_agent.human import ANALYST_OPTIONS
+
+    class OptionRecorder(ScriptedReviewer):
+        def __init__(self):
+            super().__init__()
+            self.options = None
+
+        def ask(self, question, options=None, allow_free_text=True):
+            self.options = options
+            return super().ask(question, options, allow_free_text)
+
+    reviewer = OptionRecorder()
+    orch, _llm, _ = _orchestrator(tmp_path, _thin(), [_report(**BENIGN)],
+                                  reviewer=reviewer)
+    orch.run({"id": "ALERT_009"})
+    assert [o["label"] for o in reviewer.options] == list(ANALYST_OPTIONS)
