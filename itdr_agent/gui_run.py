@@ -25,6 +25,7 @@ import threading
 from typing import Any, Callable
 
 from .human import AskUserResult, ContainmentDecision, cancelled_result
+from .summary import describe_tool_result
 from .sim_api import SimulatedGraphError
 from .tools import call_tool
 
@@ -177,13 +178,23 @@ class GuiRun:
             "arguments": dict(arguments),
             "ok": True,
             "error": None,
+            "summary": "",
         }
         try:
-            return self._tool_call(name, arguments)
+            result = self._tool_call(name, arguments)
         except SimulatedGraphError as exc:
             entry["ok"] = False
             entry["error"] = str(exc)
+            entry["summary"] = f"failed: {exc.status_code}"
             raise
+        except Exception as exc:
+            entry["ok"] = False
+            entry["error"] = str(exc)
+            entry["summary"] = f"failed: {type(exc).__name__}"
+            raise
+        else:
+            entry["summary"] = describe_tool_result(name, result)
+            return result
         finally:
             with self._cond:
                 self.tool_calls.append(entry)

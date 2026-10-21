@@ -462,3 +462,52 @@ def evidence_tree(alert: dict[str, Any], dossier: Any) -> dict[str, Any]:
         "audits": {"count": len(audits), "detail": audit_detail},
         "times": times,
     }
+
+
+# --- GUI rebuild checkpoint 4: tool results in plain words -------------------
+
+TOOL_LABELS: dict[str, str] = {
+    "get_user_profile": "Checked the user's profile",
+    "get_sign_in_history": "Pulled the sign-in history",
+    "get_device_trust": "Checked the device's trust",
+    "get_directory_audits": "Pulled the directory audits",
+    "get_risky_user_report": "Checked the risky-user report",
+}
+
+
+def describe_tool_result(name: str, result: Any) -> str:
+    """One short line about what a tool returned. Never the IP."""
+    if name == "get_user_profile":
+        if not result:
+            return "no such user"
+        parts = [result.get("jobTitle"), result.get("department")]
+        return ", ".join(p for p in parts if p) or "profile found"
+    if name == "get_sign_in_history":
+        events = result or []
+        if not events:
+            return "no sign-ins"
+        denied = sum(
+            1 for e in events
+            if (e.get("status") or {}).get("errorCode", 0)
+            and "MFA" in ((e.get("status") or {}).get("failureReason") or "")
+        )
+        text = _plural(len(events), "sign-in")
+        return f"{text}, {denied} MFA denied" if denied else text
+    if name == "get_device_trust":
+        if not result:
+            return "unknown device"
+        name_ = result.get("displayName") or "device"
+        os_name = result.get("operatingSystem")
+        label = f"{name_} ({os_name})" if os_name else name_
+        return f"{label}, {'managed' if result.get('isManaged') else 'unmanaged'}"
+    if name == "get_directory_audits":
+        audits = result or []
+        if not audits:
+            return "0 changes"
+        kinds = sorted({a.get("activityDisplayName") or "change" for a in audits})
+        return f"{_plural(len(audits), 'change')}: {', '.join(kinds)}"
+    if name == "get_risky_user_report":
+        if not result:
+            return "no risk report"
+        return f"risk {result.get('riskLevel', 'none')}, {result.get('riskState', 'none')}"
+    return "done"

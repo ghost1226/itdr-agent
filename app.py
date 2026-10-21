@@ -48,6 +48,7 @@ from itdr_agent.gui_run import BatchRunner, GuiRun  # noqa: E402
 from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E402
 from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
+from itdr_agent.adjudicator import BASELINE_HOURS  # noqa: E402
 from itdr_agent.summary import (  # noqa: E402
     alert_line,
     blast_radius,
@@ -516,6 +517,11 @@ def _brand_css() -> None:
         f".cs-row.lit {{ background:#3A1E14; border:1px solid {THREAT}; padding:7px 9px; }}"
         f".cs-row.lit .t {{ color:#FFB394; }} .cs-row.lit span:nth-child(2) {{ color:#FFE3D6; }} .cs-row.lit .o {{ color:{THREAT}; font-weight:600; }}"
         ".cs-row.dim, .cs-node.dim { opacity:0.35; }"
+        f".cs-feed {{ list-style:none; margin:0; padding:10px 18px 12px; display:flex; flex-direction:column; gap:2px; font-family:'IBM Plex Mono', monospace; font-size:13px; }}"
+        ".cs-feed li { display:grid; grid-template-columns:22px minmax(0,1fr); gap:10px; padding:7px 0; }"
+        f".cs-feed .ok {{ color:{BENIGN}; }} .cs-feed .bad {{ color:{THREAT}; }} .cs-feed .dot {{ color:{THREAT}; }} .cs-feed .wait {{ color:{SIGNAL}; }}"
+        f".cs-feed .sub {{ color:{MUTED}; }} .cs-feed li.sep {{ border-top:1px solid {LINE}; margin-top:4px; }}"
+        f".cs-panel .tok {{ padding:10px 18px; border-top:1px solid {LINE}; font-family:'IBM Plex Mono', monospace; font-size:12px; color:{MUTED}; }}"
         "</style>",
         unsafe_allow_html=True,
     )
@@ -591,19 +597,6 @@ def _sidebar() -> tuple[str, str, bool]:
         type="primary",
     )
     return mode, model, ready
-
-
-def _tool_calls(run: GuiRun) -> None:
-    st.subheader("Investigator tool calls")
-    if not run.tool_calls:
-        st.caption("No tool calls yet.")
-        return
-    lines = []
-    for number, call in enumerate(list(run.tool_calls), start=1):
-        args = ", ".join(f"{k}={v}" for k, v in call["arguments"].items())
-        outcome = "ok" if call["ok"] else f"FAILED: {call['error']}"
-        lines.append(f"{number}. {call['tool']}({args})  {outcome}")
-    st.text("\n".join(lines))
 
 
 def _report_summary(run: GuiRun) -> None:
@@ -928,6 +921,51 @@ def _evidence_tree(run: GuiRun) -> None:
 
 
 BURST_HOURS_LABEL = "1 h"
+PREFETCH_TOOLS = ("get_user_profile", "get_sign_in_history", "get_directory_audits")
+
+
+def _feed(run: GuiRun, status: str) -> None:
+    """Agent activity: the real tool names with their results in plain words,
+    then the verdict and what the agent is waiting on. Our markup; escaped."""
+    e = html.escape
+    report, _dossier = _report_and_dossier(run)
+    items = []
+    for i, call in enumerate(list(run.tool_calls)):
+        by_code = (
+            i < len(PREFETCH_TOOLS) and call["tool"] == PREFETCH_TOOLS[i]
+            and (call["tool"] == "get_user_profile" or call["arguments"].get("hours") == BASELINE_HOURS)
+        )
+        mark = '<span class="ok">✓</span>' if call["ok"] else '<span class="bad">✗</span>'
+        tag = " <span class=\"sub\">(by code)</span>" if by_code else ""
+        items.append(
+            f"<li>{mark}<span>{e(call['tool'])}{tag}<br>"
+            f'<span class="sub">{e(call.get("summary") or call.get("error") or "")}</span></span></li>'
+        )
+    if report is not None:
+        items.append(
+            '<li class="sep"><span class="dot">●</span><span>'
+            f"Verdict: {e(report.verdict.value)} {report.confidence:.2f}<br>"
+            '<span class="sub">MITRE checked against evidence</span></span></li>'
+        )
+    if status in ("question", "review"):
+        items.append('<li><span class="wait">◆</span><span class="wait">Waiting for your countersign</span></li>')
+    elif status == "running":
+        items.append('<li><span class="wait">◆</span><span class="wait">Investigating…</span></li>')
+    elif status == "done":
+        items.append(f'<li><span class="ok">■</span><span>Closed: {e(report.verdict.value) if report else "finished"}</span></li>')
+    elif status == "error":
+        items.append(f'<li><span class="bad">✗</span><span>{e(run.error or "the run stopped")}</span></li>')
+    if run.result is not None:
+        tokens = format_tokens(run.result.tokens)
+        calls = (run.result.tokens or {}).get("llm_requests")
+        head = f"{calls} model call{'s' if calls != 1 else ''}" if calls is not None else ""
+    else:
+        tokens, head = "Tokens: counted when the run closes", "working"
+    st.markdown(
+        f'<div class="cs-panel"><div class="ph"><span>Agent activity</span><small>{e(head)}</small></div>'
+        f'<ol class="cs-feed">{"".join(items)}</ol><div class="tok">{e(tokens)}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _fmt_stamp(iso: str) -> str:
@@ -996,7 +1034,11 @@ def _run_page(run: GuiRun) -> None:
     status = run.wait(POLL_SECONDS)  # first, so a finished run shows its summary
     _alert_header(run)
     _cards(run, status)
-    _evidence_tree(run)
+    tree_col, feed_col = st.columns([3, 2], gap="medium")
+    with tree_col:
+        _evidence_tree(run)
+    with feed_col:
+        _feed(run, status)
     if _back_to_queue():
         # The run stays in session_state["runs"]; its thread keeps waiting.
         st.session_state.pop("open", None)
@@ -1012,10 +1054,9 @@ def _run_page(run: GuiRun) -> None:
         with st.spinner("The agent is working..."):
             while status == "running":
                 with live.container():
-                    _tool_calls(run)
+                    _feed(run, status)
                 status = run.wait(POLL_SECONDS)
         st.rerun()  # once: draw the question, the step, or the report
-    _tool_calls(run)
     if status == "question":
         _question(run)
     elif status == "review":
