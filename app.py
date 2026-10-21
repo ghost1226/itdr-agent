@@ -50,8 +50,10 @@ from itdr_agent.orchestrator import DEFAULT_AUDIT_LOG, Orchestrator  # noqa: E40
 from itdr_agent.usage import TokenMeter, format_tokens  # noqa: E402
 from itdr_agent.adjudicator import BASELINE_HOURS  # noqa: E402
 from itdr_agent.summary import (  # noqa: E402
+    TECHNIQUE_NAMES,
     alert_line,
     blast_radius,
+    evidence_detail,
     evidence_tree,
     incident_note,
     severity,
@@ -698,48 +700,59 @@ def _review(run: GuiRun) -> None:
         st.text_input("Reason for rejecting (optional)", key=f"reject_reason_{index}")
 
 
+def _panel_header(title: str, small: str = "") -> None:
+    st.markdown(
+        f'<div class="cs-panel"><div class="ph"><span>{html.escape(title)}</span>'
+        f"<small>{html.escape(small)}</small></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _report(run: GuiRun) -> None:
+    """Closed: the incident note, the narrative, readable evidence, what was
+    kept, then the dossier and the audit trail behind expanders (audit #7, #9)."""
     result = run.result
     report = result.report
-    st.subheader("Report")
-    # Ready-to-paste note; st.code has a copy button. The model narrative is
-    # inside it, so it stays a code block rather than rendered markdown.
+    dossier = result.dossier
+    _panel_header("Incident note", "ready to paste; the copy button is on the block")
+    # st.code has a copy button. The model narrative is inside it, so it
+    # stays a code block rather than rendered markdown.
     st.code(incident_note(run.alert, result), language="text")
-    st.text(f"Verdict: {report.verdict.value}    Confidence: {report.confidence:.2f}")
-    st.text(format_tokens(result.tokens))
     if result.short_circuited:
         st.info("Critical data gap: the model was not called.")
-    st.markdown("**Narrative**")
+    _panel_header("Narrative", "the model's words, verbatim")
     st.text(report.narrative)
-    st.markdown("**MITRE ATT&CK techniques (each backed by evidence)**")
-    evidence = result.dossier.mitre_attack_evidence
-    st.text("\n".join(
-        f"{t}: evidence {', '.join(evidence.get(t, []))}"
-        for t in report.mitre_techniques_observed
-    ) or "none")
-    st.markdown("**Containment steps you kept**")
+    _panel_header("MITRE ATT&CK techniques", "each one tied to the record that proves it")
+    if report.mitre_techniques_observed:
+        for technique in report.mitre_techniques_observed:
+            name = TECHNIQUE_NAMES.get(technique, technique)
+            st.markdown(f'<span class="cs-chip">{html.escape(technique)}</span> {html.escape(name)}', unsafe_allow_html=True)
+            st.text("\n".join(evidence_detail(dossier, technique)) or "no record in the dossier")
+    else:
+        st.text("none")
+    _panel_header("Containment steps you kept", f"{len(report.containment_steps)} kept")
     st.text("\n".join(
         f"- {s.step}  (rollback: {s.rollback})" for s in report.containment_steps
     ) or "none")
-    st.markdown("**Recommended actions**")
+    _panel_header("Recommended actions")
     st.text("\n".join(f"- {a}" for a in report.recommended_actions) or "none")
     if report.action_claims:
         st.warning("The model claimed actions were already taken. They were not; "
                    "the agent executes nothing. Flagged: "
                    + "; ".join(report.action_claims))
     if report.audit_notes:
-        st.markdown("**Audit notes**")
+        _panel_header("Audit notes", "what the code guards did")
         st.text(report.audit_notes)
     with st.expander("Dossier (the evidence the verdict was based on)"):
-        st.json(result.dossier.model_dump(mode="json"))
-    st.subheader("Audit trail")
-    st.caption(f"From {result.audit_path}, this run only ({result.run_id}).")
+        st.json(dossier.model_dump(mode="json"))
     path = result.audit_path
     lines = [
         line for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and json.loads(line).get("run_id") == result.run_id
     ] if path.exists() else []
-    st.code("\n".join(lines) or "no audit lines found", language="json")
+    with st.expander(f"Audit trail ({len(lines)} lines, this run only: {result.run_id})"):
+        st.caption(f"From {path}")
+        st.code("\n".join(lines) or "no audit lines found", language="json")
 
 
 # --- feature 3: incident queue home ----------------------------------------
@@ -811,7 +824,7 @@ def _home() -> None:
     _cost_line(len(selected) if selected else len(rows), mode)
     open_col, sel_col, all_col, _gap = st.columns([1.2, 1, 1, 2.5], gap="small")
     open_col.button(
-        "Open selected" if len(selected) == 1 else "Open selected (pick one row)",
+        "Open selected",
         key="open_selected",
         disabled=len(selected) != 1,
         on_click=_open_clicked,
@@ -1131,8 +1144,23 @@ def _run_page(run: GuiRun) -> None:
 
 
 def _selected_page(alert: dict) -> None:
-    st.text(short_summary(alert))
-    st.info("Press Run investigation in the sidebar to start.")
+    """The alert before any run: chip line, what / stage / severity (audit #8)."""
+    risk = str(alert.get("riskLevelAggregated") or "none").lower()
+    st.markdown(
+        f'<div class="cs-alert"><span class="cs-chip">{html.escape(alert.get("id", ""))}</span>'
+        f"<span>{html.escape(alert_line(alert))}</span>"
+        f'<span class="cs-risk">Risk: {html.escape(risk)}</span></div>'
+        f'<div class="cs-h1" role="heading" aria-level="1">{html.escape(what(alert))} on '
+        f'{html.escape(alert.get("userPrincipalName", ""))}: {html.escape(stage(alert).lower())}.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="cs-cards">' + _card("SEVERITY", severity(alert).rsplit(" ", 1)[-1], severity(alert).split(" ")[0], SIGNAL if risk in ("high", "medium") else MUTED)
+        + _card("STAGE", stage(alert).split(" (")[0], stage(alert), TEXT)
+        + _card("STATUS", "Not started", "press Run investigation in the sidebar", MUTED) + "</div>",
+        unsafe_allow_html=True,
+    )
+    st.info("Press Run investigation in the sidebar to start. Nothing is sent until you do.")
     if _back_to_queue():
         st.session_state.pop("selected_alert", None)
         st.rerun()

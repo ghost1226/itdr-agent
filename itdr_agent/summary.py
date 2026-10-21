@@ -511,3 +511,47 @@ def describe_tool_result(name: str, result: Any) -> str:
             return "no risk report"
         return f"risk {result.get('riskLevel', 'none')}, {result.get('riskState', 'none')}"
     return "done"
+
+
+# --- GUI rebuild checkpoint 7: evidence you can read ------------------------
+
+
+def _stamp(iso: str) -> str:
+    return iso.replace("T", " ")[:16] + "Z" if len(iso) >= 16 else iso
+
+
+def evidence_detail(dossier: Any, technique: str) -> list[str]:
+    """One readable line per evidence record behind a technique (never the IP).
+
+    Sign-in: time · app · place · device · id. Audit: time · activity ·
+    role/app · id. The id comes last so it can still be checked in the logs.
+    """
+    ids = (getattr(dossier, "mitre_attack_evidence", None) or {}).get(technique, [])
+    if not ids:
+        return []
+    sign_ins = {e.get("id"): e for e in getattr(dossier, "sign_in_history", None) or []}
+    audits = {a.get("id"): a for a in getattr(dossier, "directory_audits", None) or []}
+    lines: list[str] = []
+    for rid in ids:
+        if rid in sign_ins:
+            e = sign_ins[rid]
+            lines.append(" · ".join([
+                _stamp(e.get("createdDateTime") or ""),
+                e.get("appDisplayName") or "unknown app",
+                _place(e),
+                _device_label(e),
+                rid,
+            ]))
+        elif rid in audits:
+            a = audits[rid]
+            targets = [t.get("displayName") for t in a.get("targetResources") or []
+                       if t.get("type") in ("Role", "Application") and t.get("displayName")]
+            lines.append(" · ".join(p for p in [
+                _stamp(a.get("activityDateTime") or ""),
+                a.get("activityDisplayName") or "directory change",
+                ", ".join(targets),
+                rid,
+            ] if p))
+        else:
+            lines.append(f"record {rid} (not in the dossier)")
+    return lines
