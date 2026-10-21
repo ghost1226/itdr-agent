@@ -747,14 +747,19 @@ def _report(run: GuiRun) -> None:
 
 def _home() -> None:
     """The incident queue: count, search, severity/status filters, table."""
-    st.title("Identity incident queue")
+    st.markdown(
+        '<div class="cs-panel"><div class="ph"><span>Identity incident queue</span>'
+        "<small>pick rows, then Open selected, Run selected or Run all</small></div></div>",
+        unsafe_allow_html=True,
+    )
     alerts = list(_alerts().values())
     runs = _runs()
-    search = st.text_input("Search by name, user, or ID", key="queue_search")
-    severity_filter = st.multiselect(
+    f_search, f_sev, f_status = st.columns([2, 1, 1], gap="small")
+    search = f_search.text_input("Search by name, user, or ID", key="queue_search")
+    severity_filter = f_sev.multiselect(
         "Severity", ["High", "Medium", "Low", "None"], key="queue_severity"
     )
-    status_filter = st.multiselect(
+    status_filter = f_status.multiselect(
         "Status",
         ["Not started", "Queued", "Running", "Waiting on you", "Closed"],
         key="queue_status",
