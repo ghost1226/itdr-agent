@@ -562,7 +562,8 @@ def test_review_screen_keeps_the_narrative_and_the_ticket(audit):
 
 def test_queue_has_a_panel_header_not_a_page_title(audit):
     at = _app()
-    assert at.title == []  # no 2.75rem H1 on the queue
+    # The only title left is the sidebar brand; the queue has no 2.75rem H1.
+    assert [str(t.value) for t in at.title] == ["Countersign: Layer Zero"]
     text = _page_text(at)
     assert "Identity incident queue" in text
     assert "10 alerts" in text
