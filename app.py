@@ -195,6 +195,8 @@ def _build_for(alert_id: str, mode: str, model: str):
 def _open(alert_id: str) -> None:
     _clear_widgets()
     st.session_state["open"] = alert_id
+    st.session_state["last_open"] = alert_id
+    st.session_state["page"] = "investigation"
     st.session_state.pop("selected_alert", None)
 
 
@@ -486,9 +488,10 @@ def _brand_css() -> None:
         ".cs-brand { display:flex; align-items:center; gap:12px; }"
         f".cs-brand .name {{ font-size:18px; font-weight:600; color:{TEXT}; }}"
         f".cs-brand .layer {{ font-family:'IBM Plex Mono', monospace; font-size:13px; color:{SIGNAL}; letter-spacing:0.08em; }}"
-        ".cs-nav { display:flex; flex-wrap:wrap; gap:6px; }"
-        f".cs-nav span {{ padding:8px 14px; border-radius:8px; color:{MUTED}; font-size:14px; }}"
-        f".cs-nav span.on {{ background:#1A2230; color:{TEXT}; }}"
+        ".st-key-cs-nav { margin:-4px 0 10px; }"
+        ".st-key-cs-nav .stButton button { padding:6px 14px; border-radius:8px; font-size:14px; border:0; box-shadow:none; }"
+        f".st-key-cs-nav .stButton button[data-testid='stBaseButton-tertiary'] {{ color:{MUTED}; }}"
+        f".st-key-cs-nav .stButton button[data-testid='stBaseButton-secondary'] {{ background:#1A2230; color:{TEXT}; }}"
         f".cs-pill {{ display:flex; align-items:center; gap:10px; font-family:'IBM Plex Mono', monospace; font-size:13px; color:{MUTED}; }}"
         ".cs-pill i { width:8px; height:8px; border-radius:50%; display:inline-block; }"
         f".cs-chip {{ font-family:'IBM Plex Mono', monospace; font-size:12px; padding:3px 8px; border-radius:6px; background:#1A2230; color:{TEXT}; }}"
@@ -538,15 +541,12 @@ def _brand_css() -> None:
 
 
 def _header(page: str, mode: str, model: str) -> None:
-    """The Countersign strip: mark, wordmark, nav, mode pill. Static markup."""
-    nav = "".join(
-        f'<span class="{"on" if key == page else ""}">{html.escape(label)}</span>'
-        for key, label in (
-            ("queue", f"Queue ({len(_alerts())})"),
-            ("investigation", "Investigation"),
-            ("audit", "Audit log"),
-        )
-    )
+    """The Countersign strip: mark, wordmark, mode pill, then the nav.
+
+    The nav chips are Streamlit buttons, not links: a link would reload the
+    page and drop every run in session state. The current page's chip is
+    the secondary (filled) button; the others are tertiary (text only).
+    """
     live = mode == LIVE
     pill = (
         f'<span class="cs-pill"><i style="background:{BENIGN if live else MUTED}"></i>'
@@ -555,9 +555,182 @@ def _header(page: str, mode: str, model: str) -> None:
     st.markdown(
         f'<div class="cs-header"><div class="cs-brand">{MARK_SVG}'
         f'<span class="name">Countersign</span><span class="layer">LAYER ZERO</span></div>'
-        f'<nav class="cs-nav" aria-label="Main">{nav}</nav>{pill}</div>',
+        f"{pill}</div>",
         unsafe_allow_html=True,
     )
+    with st.container(key="cs-nav"):
+        cols = st.columns([1, 1, 1, 5], gap="small")
+        for col, (key, label, callback) in zip(cols, (
+            ("queue", f"Queue ({len(_alerts())})", _nav_queue),
+            ("investigation", "Investigation", _nav_investigation),
+            ("audit", "Audit log", _nav_audit),
+        )):
+            col.button(
+                label,
+                key=f"nav_{key}",
+                on_click=callback,
+                type="secondary" if key == page else "tertiary",
+                use_container_width=True,
+            )
+
+
+def _nav_queue() -> None:
+    st.session_state["page"] = "queue"
+    st.session_state.pop("open", None)
+    st.session_state.pop("selected_alert", None)
+
+
+def _nav_investigation() -> None:
+    """The open run, else the last run opened this session, else the queue."""
+    st.session_state["page"] = "investigation"
+    if st.session_state.get("open") is None:
+        last = st.session_state.get("last_open")
+        if last and last in _runs():
+            st.session_state["open"] = last
+
+
+def _nav_audit() -> None:
+    st.session_state["page"] = "audit"
+
+
+def _audit_this_run(run_id: str) -> None:
+    st.session_state["audit_run"] = run_id
+    st.session_state["page"] = "audit"
+
+
+def _audit_all_runs() -> None:
+    st.session_state.pop("audit_run", None)
+
+
+# --- CP8: audit log page ---------------------------------------------------
+
+AUDIT_COLUMNS = ["Time", "Run", "Alert", "Event", "Verdict / decision", "Source"]
+
+
+def _audit_entries() -> tuple[list[dict], int]:
+    """Every line of audit.jsonl (live) and audit-mock.jsonl, oldest first.
+
+    A line that is not a JSON object is counted and skipped, never shown.
+    """
+    live = _audit_path()
+    entries: list[dict] = []
+    skipped = 0
+    for path, source in ((live, "live"), (live.with_name("audit-mock.jsonl"), "mock")):
+        if not path.exists():
+            continue
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                skipped += 1
+                continue
+            if not isinstance(entry, dict):
+                skipped += 1
+                continue
+            entry["_source"] = source
+            entry["_raw"] = raw
+            entries.append(entry)
+    entries.sort(key=lambda e: str(e.get("timestamp", "")))
+    return entries, skipped
+
+
+def _audit_outcome(entry: dict) -> str:
+    """The one value worth a column: the verdict, the decision, or the reason."""
+    if entry.get("verdict"):
+        confidence = entry.get("confidence")
+        if isinstance(confidence, (int, float)):
+            return f"{entry['verdict']} {confidence:.2f}"
+        return str(entry["verdict"])
+    if entry.get("decision"):
+        return str(entry["decision"])
+    if entry.get("event") == "ask_user":
+        return "question asked"
+    for key in ("reason", "error", "status", "trigger"):
+        if entry.get(key):
+            return str(entry[key])[:80]
+    return ""
+
+
+def _audit_rows(entries: list[dict]) -> list[dict[str, str]]:
+    return [
+        {
+            "Time": _fmt_stamp(str(e.get("timestamp", ""))),
+            "Run": str(e.get("run_id", "")),
+            "Alert": str(e.get("alert_id", "")),
+            "Event": str(e.get("event", "")),
+            "Verdict / decision": _audit_outcome(e),
+            "Source": e["_source"],
+        }
+        for e in entries
+    ]
+
+
+def _styled_audit(rows: list[dict[str, str]]):
+    import pandas as pd
+
+    frame = pd.DataFrame(rows, columns=AUDIT_COLUMNS)
+    if frame.empty:
+        return frame
+
+    def outcome_color(value: str) -> str:
+        text = str(value)
+        if text.startswith(("COMPROMISED", "reject")):
+            return f"color: {THREAT}; font-weight: 600"
+        if text.startswith(("SUSPICIOUS", "edit")):
+            return f"color: {SIGNAL}; font-weight: 600"
+        if text.startswith(("FALSE_POSITIVE", "approve")):
+            return f"color: {BENIGN}; font-weight: 600"
+        return f"color: {MUTED}"
+
+    def source_color(value: str) -> str:
+        return f"color: {MUTED}" if value == "mock" else f"color: {TEXT}"
+
+    return (
+        frame.style.map(outcome_color, subset=["Verdict / decision"])
+        .map(source_color, subset=["Source"])
+    )
+
+
+def _audit_page() -> None:
+    """Both audit files in one dark table, filters by alert and event,
+    optionally one run only, the raw JSON behind an expander as code."""
+    entries, skipped = _audit_entries()
+    only_run = st.session_state.get("audit_run")
+    live = _audit_path()
+    st.markdown(
+        '<div class="cs-panel"><div class="ph"><span>Audit log</span>'
+        f"<small>{html.escape(live.name)} (live) + audit-mock.jsonl (offline demo), oldest first</small></div></div>",
+        unsafe_allow_html=True,
+    )
+    if only_run:
+        st.caption(f"Showing this run only: {only_run}")
+        st.button("All runs", key="audit_all_runs", on_click=_audit_all_runs)
+        entries = [e for e in entries if str(e.get("run_id")) == only_run]
+    f_alert, f_event = st.columns(2, gap="small")
+    alert_filter = f_alert.multiselect(
+        "Alert", sorted({str(e.get("alert_id", "")) for e in entries if e.get("alert_id")}),
+        key="audit_alert",
+    )
+    event_filter = f_event.multiselect(
+        "Event", sorted({str(e.get("event", "")) for e in entries if e.get("event")}),
+        key="audit_event",
+    )
+    if alert_filter:
+        entries = [e for e in entries if str(e.get("alert_id", "")) in alert_filter]
+    if event_filter:
+        entries = [e for e in entries if str(e.get("event", "")) in event_filter]
+    rows = _audit_rows(entries)
+    st.caption(
+        f"{_plural(len(rows), 'line')}"
+        + (f" · {_plural(skipped, 'line')} skipped (not valid JSON)" if skipped else "")
+    )
+    st.dataframe(_styled_audit(rows), hide_index=True, use_container_width=True)
+    with st.expander(f"Raw JSON ({_plural(len(entries), 'line')}, exactly as written)"):
+        # The lines hold model text (questions, step wording), so a code block,
+        # never markdown.
+        st.code("\n".join(e["_raw"] for e in entries) or "no audit lines", language="json")
 
 
 # --- page ------------------------------------------------------------------
@@ -753,6 +926,12 @@ def _report(run: GuiRun) -> None:
     with st.expander(f"Audit trail ({len(lines)} lines, this run only: {result.run_id})"):
         st.caption(f"From {path}")
         st.code("\n".join(lines) or "no audit lines found", language="json")
+    st.button(
+        "Audit log for this run",
+        key="audit_this_run",
+        on_click=_audit_this_run,
+        args=(result.run_id,),
+    )
 
 
 # --- feature 3: incident queue home ----------------------------------------
@@ -901,6 +1080,7 @@ def _open_or_select(alert_id: str) -> None:
         _open(alert_id)
     else:
         st.session_state["selected_alert"] = alert_id
+        st.session_state["page"] = "investigation"
         st.session_state.pop("open", None)
 
 
@@ -1173,12 +1353,15 @@ def main() -> None:
     open_id: str | None = st.session_state.get("open")
     run: GuiRun | None = _runs().get(open_id) if open_id else None
     selected: str | None = st.session_state.get("selected_alert")
+    mode = st.session_state.get("mode", OFFLINE)
+    model = os.getenv("EVAL_MODEL", DEFAULT_MODEL)
+    if st.session_state.get("page") == "audit":
+        _header("audit", mode, model)
+        _audit_page()
+        _sidebar()
+        return
     on_home = run is None and selected is None
-    _header(
-        "queue" if on_home else "investigation",
-        st.session_state.get("mode", OFFLINE),
-        os.getenv("EVAL_MODEL", DEFAULT_MODEL),
-    )
+    _header("queue" if on_home else "investigation", mode, model)
     if on_home:
         # Draw the queue first so a row selection can set the sidebar alert
         # before the selectbox widget is created.

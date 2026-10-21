@@ -502,7 +502,9 @@ def test_header_strip_shows_the_brand_and_nav(audit):
     text = _page_text(at)
     assert "LAYER ZERO" in text
     assert "Countersign" in text
-    assert "Queue" in text and "Investigation" in text and "Audit log" in text
+    # CP8: the nav chips are buttons, so the labels live on the buttons
+    labels = [at.button(key=f"nav_{key}").label for key in ("queue", "investigation", "audit")]
+    assert labels[0].startswith("Queue (") and labels[1:] == ["Investigation", "Audit log"]
     assert "Offline demo" in text  # the mode pill
     at = _start(at, "ALERT_001")
     assert "LAYER ZERO" in _page_text(at)  # same header on the run page
