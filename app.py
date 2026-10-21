@@ -841,7 +841,11 @@ def _alert_header(run: GuiRun) -> None:
         if report is not None
         else f"{alert.get('userPrincipalName', '')}: investigation in progress."
     )
-    st.markdown(f'<h1 class="cs-h1">{html.escape(headline)}</h1>', unsafe_allow_html=True)
+    # A div, not <h1>: Streamlit's own heading rule would blow it up to 2.75rem.
+    st.markdown(
+        f'<div class="cs-h1" role="heading" aria-level="1">{html.escape(headline)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _card(label: str, value: str, detail: str, color: str = TEXT) -> str:
@@ -959,7 +963,6 @@ def main() -> None:
     _sidebar()
     if on_home:
         return
-    st.title("Identity incident review")
     if run is None:
         _selected_page(_alerts()[selected])
     else:
