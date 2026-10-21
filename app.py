@@ -685,7 +685,7 @@ def _review(run: GuiRun) -> None:
     )
     if pending["warning"]:
         st.warning(pending["warning"])
-    approve, edit, reject = st.columns(3)
+    approve, edit, reject, _gap = st.columns([1, 1, 1, 4], gap="small")
     approve.button("Approve", key=f"approve_{index}", type="primary",
                    on_click=_decide, args=(run, index, "approve"))
     edit.button("Edit", key=f"edit_{index}",
@@ -791,7 +791,7 @@ def _home() -> None:
         )
     st.markdown(f"**{len(rows)} alert{'s' if len(rows) != 1 else ''}**")
     event = st.dataframe(
-        rows,
+        _styled_queue(rows),  # queue-table: severity and status in the brand colors
         key="queue",
         on_select="rerun",
         selection_mode="single-row",
@@ -809,7 +809,7 @@ def _home() -> None:
     mode = st.session_state.get("mode", OFFLINE)
     busy = _batch_running()
     _cost_line(len(selected) if selected else len(rows), mode)
-    open_col, sel_col, all_col = st.columns(3)
+    open_col, sel_col, all_col, _gap = st.columns([1.2, 1, 1, 2.5], gap="small")
     open_col.button(
         "Open selected" if len(selected) == 1 else "Open selected (pick one row)",
         key="open_selected",
@@ -839,6 +839,35 @@ def _home() -> None:
         )
         time.sleep(BATCH_POLL_SECONDS)
         st.rerun()
+
+
+def _styled_queue(rows: list[dict[str, str]]):
+    """The queue table with Severity and Status colored; the data is untouched."""
+    import pandas as pd
+
+    frame = pd.DataFrame(rows, columns=["Name", "Alert ID", "Severity", "Stage", "Status"])
+    if frame.empty:
+        return frame
+
+    def severity_color(value: str) -> str:
+        word = str(value).rsplit(" ", 1)[-1]
+        color = {"High": THREAT, "Medium": SIGNAL, "Low": BENIGN}.get(word, MUTED)
+        return f"color: {color}; font-weight: 600"
+
+    def status_color(value: str) -> str:
+        text = str(value)
+        if text.startswith("Waiting"):
+            return f"color: {BENIGN}; font-weight: 600"
+        if text in ("Running", "Queued"):
+            return f"color: {SIGNAL}"
+        if text.startswith("Closed"):
+            return f"color: {MUTED}"
+        return ""
+
+    return (
+        frame.style.map(severity_color, subset=["Severity"])
+        .map(status_color, subset=["Status"])
+    )
 
 
 def _selected_ids() -> list[str]:
