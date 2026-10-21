@@ -387,6 +387,7 @@ class Orchestrator:
                     "alert_id": dossier.alert_id,
                     "verdict": report.verdict.value,
                     "steps": report.moved_containment_steps,
+                    "unsafe_rollbacks": report.moved_unsafe_rollbacks,
                 },
             )
         if report.ip_range_reasoning:

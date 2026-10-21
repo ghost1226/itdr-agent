@@ -10,7 +10,9 @@ policy lives in code, never in the model's promise:
     the guard counts the user's last 7 days itself, not the model's window
     (problem #34);
   * a FALSE_POSITIVE or INSUFFICIENT_DATA verdict carries no containment
-    steps: code moves them to recommended actions (Dream Run 1 item 4);
+    steps: code moves them to recommended actions (Dream Run 1 item 4), after
+    known one-way steps get a standard rollback, with any undo that is still
+    unsafe marked in the text (review 2026-10-21 finding 2);
   * every MITRE technique in the report must appear in the dossier's
     ``mitre_attack_evidence`` — anything else is rejected, not trusted;
   * the dossier is serialized with ``<``/``>`` escaped inside
@@ -201,6 +203,16 @@ THIN_EVIDENCE_NOTE = (
 # Containment is for COMPROMISED and SUSPICIOUS only.
 NO_CONTAINMENT_VERDICTS = {Verdict.FALSE_POSITIVE, Verdict.INSUFFICIENT_DATA}
 MOVED_STEP_ACTION = "Optional, analyst's call: {step} (undo: {rollback})"
+# Review 2026-10-21 finding 2: a moved step kept its unsafe undo with no flag.
+MOVED_UNSAFE_SUFFIX = (
+    "WARNING: this undo would restore a credential or MFA setup the attacker "
+    "may know; do not use it as written."
+)
+MOVED_UNSAFE_NOTE = (
+    "Unsafe-rollback guard: moved step(s) {steps} carry an undo that would "
+    "restore a credential or MFA setup the attacker may know; the warning is "
+    "in the recommended action."
+)
 NO_CONTAINMENT_NOTE = (
     "No-containment guard: {count} containment step(s) moved to recommended "
     "actions because the verdict is {verdict}."
@@ -309,7 +321,7 @@ def apply_action_claim_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
 def find_ip_range_reasoning(report: AdjudicatorOutput) -> list[str]:
     """Phrases where the report treats an IP's address range as evidence."""
     found: list[str] = []
-    for text in [report.narrative, report.audit_notes, *report.recommended_actions]:
+    for text in _report_texts(report):  # steps too: they may be moved later
         for pattern in _IP_RANGE_PATTERNS:
             for match in pattern.finditer(text):
                 phrase = match.group(0).strip()
@@ -390,15 +402,23 @@ def apply_no_containment_guard(report: AdjudicatorOutput) -> AdjudicatorOutput:
     """Move containment steps off a benign/unknown verdict; set by code only."""
     if report.verdict not in NO_CONTAINMENT_VERDICTS or not report.containment_steps:
         return report
-    moved = [
-        MOVED_STEP_ACTION.format(step=s.step, rollback=s.rollback)
-        for s in report.containment_steps
-    ]
+    moved: list[str] = []
+    unsafe: list[int] = []
+    for index, s in enumerate(report.containment_steps):
+        action = MOVED_STEP_ACTION.format(step=s.step, rollback=s.rollback)
+        if is_unsafe_rollback(s.rollback):
+            action = f"{action} {MOVED_UNSAFE_SUFFIX}"
+            unsafe.append(index)
+        moved.append(action)
     report.recommended_actions = [*report.recommended_actions, *moved]
     report.containment_steps = []
     report.moved_containment_steps = len(moved)
+    report.moved_unsafe_rollbacks = unsafe
     note = NO_CONTAINMENT_NOTE.format(count=len(moved), verdict=report.verdict.value)
     report.audit_notes = f"{report.audit_notes}\n{note}".strip()
+    if unsafe:
+        note = MOVED_UNSAFE_NOTE.format(steps=", ".join(str(i) for i in unsafe))
+        report.audit_notes = f"{report.audit_notes}\n{note}".strip()
     return report
 
 
@@ -510,9 +530,11 @@ class Adjudicator:
             self.baseline(dossier.user_principal_name) if self.baseline else None
         )
         report = apply_thin_evidence_guard(report, dossier, baseline)
+        # Standard rollbacks go in before the move, so a one-way step that
+        # leaves a benign verdict carries a safe undo (finding 2).
+        report = apply_standard_rollbacks(report)
         report = apply_no_containment_guard(report)
         report = apply_action_claim_guard(report)
-        report = apply_standard_rollbacks(report)
         report = apply_unsafe_rollback_guard(report)
         assert_mitre_claims_supported(report, dossier)
         return report
