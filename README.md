@@ -57,7 +57,7 @@ The 10 alerts: 5 attacks (impossible travel, MFA fatigue, anonymous IP, app cons
 pytest
 ```
 
-254 tests, no network, no API key needed. The model is mocked in every unit test.
+527 tests, no network, no API key needed. The model is mocked in every unit test.
 
 ## Run the demo
 
@@ -90,6 +90,33 @@ It opens at http://localhost:8501. Pick a mode in the sidebar:
 - **Live:** the real model with the key in your `.env` (never shown on the page). Each alert uses about 6 to 8 of a free account's 50 daily requests.
 
 The Report shows the verdict, the MITRE techniques with the evidence behind each one, the steps you kept, a ready-to-paste incident note, the token use (`Tokens: … in / … out across N model calls`), and this run's lines from `logs/audit.jsonl`. The CLI prints the same token line after its report.
+
+### Several incidents at once
+
+Select rows in the queue and press **Run selected**, or press **Run all**. The batch runs one alert at a time (only one is ever investigating, so a batch never bursts the free tier); a run that reaches you (a question or a containment step) is parked as **Waiting on you** and the batch moves on. Open a waiting row with **Open selected** and approve, edit, or reject as usual; **Back to queue** leaves it waiting. In live mode the queue shows what a batch will spend before it starts (about 6 to 10 requests per alert against a free account's 50 a day).
+
+### Voice commands
+
+The **Voice command** box on every page has a mic button and a typed fallback. Audio goes to a local whisper.cpp server and never leaves your machine; the words are parsed by code, not a model. Every command starts with the wake word **"zero"**; anything else is ignored.
+
+| Say | Does |
+|---|---|
+| zero run all | runs every alert in the queue |
+| zero run 3 and 6 | runs ALERT_003 and ALERT_006 |
+| zero open alert 6 | opens ALERT_006 |
+| zero approve / zero reject because … / zero edit step 1 to … | read back on screen first; then **zero yes** (or the Yes button) acts, **zero no** cancels |
+| zero expected / zero suspicious / zero I don't know | answers the agent's one question |
+| zero skip | skips the question (no decision has been supplied) |
+| zero back | back to the queue |
+
+Start the Whisper server once (the sidebar says whether it is reachable; typed commands work without it):
+
+```bash
+brew install whisper-cpp   # once; then download the model into ~/whisper-models/
+whisper-server --host 127.0.0.1 --port 2022 -m ~/whisper-models/ggml-small.en.bin --inference-path /v1/audio/transcriptions
+```
+
+`WHISPER_URL` in `.env` overrides the default `http://127.0.0.1:2022/v1/audio/transcriptions`.
 
 Found a problem? Open an issue on the repo with what you clicked, what you expected, and what happened.
 
