@@ -53,6 +53,8 @@ class GuiRun:
         self.status = "idle"  # idle | running | question | review | done | error
         self.pending: dict[str, Any] | None = None
         self.tool_calls: list[dict[str, Any]] = []
+        # step index -> "approve" | "edit" | "reject", as the analyst decides.
+        self.decisions: dict[int, str] = {}
         self.result: Any = None
         self.error: str | None = None
         # Pre-decision report summary (feature 1): stored by show_report and
@@ -122,6 +124,7 @@ class GuiRun:
                 edited_rollback = (edited_rollback or "").strip() or None
                 if not (edited_step or edited_rollback):
                     raise ValueError("an edit needs a new step or a new rollback")
+            self.decisions[self.pending["index"]] = decision
             self._hand_back(
                 ContainmentDecision(
                     decision=decision,

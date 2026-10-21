@@ -522,6 +522,14 @@ def _brand_css() -> None:
         f".cs-feed .ok {{ color:{BENIGN}; }} .cs-feed .bad {{ color:{THREAT}; }} .cs-feed .dot {{ color:{THREAT}; }} .cs-feed .wait {{ color:{SIGNAL}; }}"
         f".cs-feed .sub {{ color:{MUTED}; }} .cs-feed li.sep {{ border-top:1px solid {LINE}; margin-top:4px; }}"
         f".cs-panel .tok {{ padding:10px 18px; border-top:1px solid {LINE}; font-family:'IBM Plex Mono', monospace; font-size:12px; color:{MUTED}; }}"
+        f".cs-step {{ display:flex; flex-wrap:wrap; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid {LINE}; }}"
+        ".cs-step .body { flex:999 1 420px; min-width:0; display:flex; flex-direction:column; gap:4px; }"
+        ".cs-step .title { font-size:15px; font-weight:600; }"
+        f".cs-step .rb {{ font-size:14px; color:{MUTED}; }}"
+        f".cs-step.done {{ opacity:0.6; }} .cs-step.next {{ color:{MUTED}; }}"
+        f".cs-step .state {{ font-family:'IBM Plex Mono', monospace; font-size:12px; padding:3px 8px; border-radius:6px; background:#1A2230; color:{MUTED}; }}"
+        f".cs-step .state.approve {{ color:{BENIGN}; }} .cs-step .state.reject {{ color:{THREAT}; }} .cs-step .state.edit {{ color:{SIGNAL}; }} .cs-step .state.active {{ background:#2A2112; color:{SIGNAL}; }}"
+        f".cs-note {{ padding:12px 18px; font-size:14px; color:{MUTED}; }}"
         "</style>",
         unsafe_allow_html=True,
     )
@@ -599,33 +607,24 @@ def _sidebar() -> tuple[str, str, bool]:
     return mode, model, ready
 
 
-def _report_summary(run: GuiRun) -> None:
-    """Show the verdict before the analyst decides (feature 1).
-
-    Uses only code-owned report fields plus the dossier's evidence ids. The
-    model narrative goes through st.text, never markdown.
-    """
+def _narrative_panel(run: GuiRun) -> None:
+    """The verdict line, the model's narrative (st.text, never markdown) and
+    Joe's ticket lines, shown before the analyst decides (audit #1, #10)."""
     report = run.shown_report
     dossier = run.shown_dossier
     if report is None:
         return
-    with st.container(border=True):
-        st.markdown(f"**{verdict_line(report)}**")
-        st.text(report.narrative)
-        evidence = dossier.mitre_attack_evidence if dossier is not None else {}
-        techniques = report.mitre_techniques_observed or []
-        st.text(
-            "\n".join(
-                f"{t}: evidence {', '.join(evidence.get(t, []))}"
-                for t in techniques
-            )
-            or "MITRE ATT&CK techniques: none"
-        )
-        st.text("\n".join(ticket_lines(run.alert, report, dossier)))
+    st.markdown(
+        f'<div class="cs-panel"><div class="ph"><span>{html.escape(verdict_line(report))}</span>'
+        '<small>the model\'s narrative, word for word</small></div></div>',
+        unsafe_allow_html=True,
+    )
+    st.text(report.narrative)
+    st.text("\n".join(ticket_lines(run.alert, report, dossier)))
 
 
 def _question(run: GuiRun) -> None:
-    _report_summary(run)
+    _narrative_panel(run)
     pending = run.pending
     st.subheader("The agent has one question for you")
     st.text(pending["question"])
@@ -645,21 +644,47 @@ def _question(run: GuiRun) -> None:
                "agent does not re-check.")
 
 
+STATE_WORDS = {"approve": "Approved", "edit": "Edited", "reject": "Rejected"}
+
+
 def _review(run: GuiRun) -> None:
-    _report_summary(run)
+    """Containment: your countersign. Every step listed; the one the
+    orchestrator waits on is active, decided ones keep their verdict."""
+    _narrative_panel(run)
     pending = run.pending
     index = pending["index"]
-    st.subheader(f"Containment step {index + 1}: your decision")
-    st.caption("The agent only recommends. Nothing runs until you approve.")
-    st.markdown("**Step**")
-    st.text(pending["step"])
-    st.markdown("**Rollback (how to undo it)**")
-    st.text(pending["rollback"])
+    report = run.shown_report
+    steps = list(report.containment_steps) if report is not None else []
+    total = max(len(steps), index + 1)
+    e = html.escape
+    rows = []
+    for i in range(total):
+        step_text = steps[i].step if i < len(steps) else pending["step"]
+        rollback = steps[i].rollback if i < len(steps) else pending["rollback"]
+        if i == index:
+            step_text, rollback = pending["step"], pending["rollback"]
+            state = '<span class="state active">your call</span>'
+            cls = "active"
+        elif i in run.decisions:
+            d = run.decisions[i]
+            state = f'<span class="state {d}">{STATE_WORDS[d]}</span>'
+            cls = "done"
+        else:
+            state = '<span class="state">up next</span>'
+            cls = "next"
+        rows.append(
+            f'<div class="cs-step {cls}"><div class="body"><span class="title">{i + 1} · {e(step_text)}</span>'
+            f'<span class="rb">Rollback: {e(rollback)}</span></div>{state}</div>'
+        )
+    st.markdown(
+        '<div class="cs-panel"><div class="ph"><span>Containment: your countersign</span>'
+        f"<small>Step {index + 1} of {total}</small></div>"
+        + "".join(rows)
+        + '<div class="cs-note">The agent only recommends. Nothing runs until you approve.</div></div>',
+        unsafe_allow_html=True,
+    )
     if pending["warning"]:
         st.warning(pending["warning"])
-    st.text_input("New step text (for Edit; blank keeps it)", key=f"edited_step_{index}")
-    st.text_input("New rollback (for Edit; blank keeps it)", key=f"edited_rollback_{index}")
-    st.text_input("Reason (for Reject, optional)", key=f"reject_reason_{index}")
     approve, edit, reject = st.columns(3)
     approve.button("Approve", key=f"approve_{index}", type="primary",
                    on_click=_decide, args=(run, index, "approve"))
@@ -667,6 +692,10 @@ def _review(run: GuiRun) -> None:
                 on_click=_decide, args=(run, index, "edit"))
     reject.button("Reject", key=f"reject_{index}",
                   on_click=_decide, args=(run, index, "reject"))
+    with st.expander(f"Edit step {index + 1}, or give a reason to reject it"):
+        st.text_input("New step text (blank keeps it)", key=f"edited_step_{index}")
+        st.text_input("New rollback (blank keeps it)", key=f"edited_rollback_{index}")
+        st.text_input("Reason for rejecting (optional)", key=f"reject_reason_{index}")
 
 
 def _report(run: GuiRun) -> None:
