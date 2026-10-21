@@ -91,6 +91,8 @@ It opens at http://localhost:8501 as **Countersign: Layer Zero** (the brand and 
 
 The Report shows the verdict, the MITRE techniques with the evidence behind each one, the steps you kept, a ready-to-paste incident note, the token use (`Tokens: … in / … out across N model calls`), and this run's lines from `logs/audit.jsonl`. The CLI prints the same token line after its report.
 
+The header nav is live: **Queue** goes home, **Investigation** reopens the run you were on, **Audit log** opens the Audit log page. That page reads `logs/audit.jsonl` (live runs) and `logs/audit-mock.jsonl` (offline demo) into one table, oldest first: time, run, alert, event, the verdict or decision, and which file it came from. Filter by alert or event; **Audit log for this run** on a closed report shows that run's lines only (**All runs** clears it). The raw JSON lines sit behind an expander as a code block; a line that isn't valid JSON is counted and skipped, never shown.
+
 ### Several incidents at once
 
 Select rows in the queue and press **Run selected**, or press **Run all**. The batch runs one alert at a time (only one is ever investigating, so a batch never bursts the free tier); a run that reaches you (a question or a containment step) is parked as **Waiting on you** and the batch moves on. Open a waiting row with **Open selected** and approve, edit, or reject as usual; **Back to queue** leaves it waiting. In live mode the queue shows what a batch will spend before it starts (about 6 to 10 requests per alert against a free account's 50 a day).
