@@ -103,6 +103,7 @@ BATCH_POLL_SECONDS = 2.0
 _W = voice.WAKE_WORD
 VOICE_HINT = (
     f"Start with the wake word \"{_W}\" (said as the letter): \"{_W} run all\", "
+    f"\"{_W} run all high alerts\", \"{_W} run all checked alerts\", "
     f"\"{_W} open alert 6\", \"{_W} approve\", \"{_W} reject because …\", "
     f"\"{_W} edit step 1 to …\", \"{_W} expected\", \"{_W} skip\", \"{_W} back\"."
 )
@@ -362,6 +363,24 @@ def _apply_command(cmd: voice.Command | None, heard: str) -> None:
     elif cmd.action == "run_all":
         _start_batch(list(st.session_state.get("queue_rows") or alerts))
         _say("Running every alert in the queue, one at a time.")
+    elif cmd.action == "run_level":
+        level = cmd.text or ""
+        ids = [
+            alert_id for alert_id, alert in alerts.items()
+            if str(alert.get("riskLevelAggregated") or "none").lower() == level
+        ]
+        if not ids:
+            _say(f"No {level} alerts in the queue.")
+        else:
+            _start_batch(ids)
+            _say(f"Running {len(ids)} {level} alert{'s' if len(ids) != 1 else ''}: {', '.join(ids)}.")
+    elif cmd.action == "run_checked":
+        ids = _selected_ids()
+        if not ids:
+            _say("Nothing is checked in the queue. Tick rows first, or say z run all.")
+        else:
+            _start_batch(ids)
+            _say(f"Running the {len(ids)} checked alert{'s' if len(ids) != 1 else ''}: {', '.join(ids)}.")
     elif cmd.action == "run":
         known = [a for a in cmd.alerts if a in alerts]
         if not known:

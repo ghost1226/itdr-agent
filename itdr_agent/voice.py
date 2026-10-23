@@ -50,11 +50,11 @@ class VoiceError(Exception):
 
 @dataclass(frozen=True)
 class Command:
-    action: str  # run_all | run | open | approve | reject | edit | skip | back | yes | no | answer | unknown
+    action: str  # run_all | run_level | run_checked | run | open | approve | reject | edit | skip | back | yes | no | answer | unknown
     heard: str = ""
     alerts: tuple[str, ...] = ()
     step: int | None = None  # 1-based, as spoken
-    text: str | None = None  # reject reason or the edited step
+    text: str | None = None  # reject reason, the edited step, or the severity for run_level
     choice: int | None = None  # index into ANALYST_OPTIONS
 
 
@@ -110,6 +110,13 @@ def parse_command(text: str) -> Command | None:
         return any(head.startswith(stem) for stem in stems)
 
     if is_("run"):
+        # "run all high alerts" names a severity; "run all checked alerts" the
+        # ticked rows (Joe, 2026-10-23). Both are checked before plain "all".
+        level = re.search(r"\b(high|medium|low|none)\b", rest)
+        if level:
+            return Command("run_level", heard, text=level.group(1))
+        if re.search(r"\b(checked|selected|ticked)\b", rest):
+            return Command("run_checked", heard)
         if re.search(r"\b(all|everything|every)\b", rest) or len(words) == 1:
             return Command("run_all", heard)
         ids = _alert_ids(rest)

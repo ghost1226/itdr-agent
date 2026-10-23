@@ -119,6 +119,8 @@ The **Voice command** box on every page has a mic button and a typed fallback. A
 | Say | Does |
 |---|---|
 | z run all | runs every alert in the queue |
+| z run all high alerts (or medium / low / none) | runs every alert of that severity |
+| z run all checked alerts | runs the rows ticked in the queue |
 | z run 3 and 6 | runs ALERT_003 and ALERT_006 |
 | z open alert 6 | opens ALERT_006 |
 | z approve / z reject because … / z edit step 1 to … | read back on screen first; then **z yes** (or the Yes button) acts, **z no** cancels |
