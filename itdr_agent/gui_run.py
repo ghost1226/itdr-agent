@@ -22,6 +22,7 @@ Kept free of any web framework so it is testable offline.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable
 
 from .human import AskUserResult, ContainmentDecision, cancelled_result
@@ -61,6 +62,14 @@ class GuiRun:
         # refreshed after a re-adjudication.
         self.shown_report: Any = None
         self.shown_dossier: Any = None
+        # The orchestrator this run built, so the page can read its token meter
+        # while the model works (batch progress line, 2026-10-23).
+        self.orchestrator: Any = None
+        self.started: float | None = None
+
+    @property
+    def meter(self) -> Any:
+        return getattr(self.orchestrator, "token_meter", None)
 
     # --- page side ---------------------------------------------------------
 
@@ -221,7 +230,9 @@ class GuiRun:
 
     def _work(self) -> None:
         try:
-            result = self._build(self, self._record_tool).run(self.alert)
+            self.orchestrator = self._build(self, self._record_tool)
+            self.started = time.time()
+            result = self.orchestrator.run(self.alert)
         except Exception as exc:  # shown on the page, never swallowed
             with self._cond:
                 self.error = f"{type(exc).__name__}: {exc}"

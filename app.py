@@ -1042,14 +1042,37 @@ def _home() -> None:
     )
     _voice_panel()
     if busy:
+        # Update one line in place while the model works; redraw the page
+        # only when a run parks or finishes (a full rerun every poll made the
+        # page flash; Joe, 2026-10-23). Same approach as the run page.
         batch = _batch()
-        now = f", now {batch.current}" if batch.current else ""
-        st.caption(
-            f"Batch running: {batch.completed} of {batch.total} started and "
-            f"parked or finished{now}. One alert investigates at a time."
-        )
-        time.sleep(BATCH_POLL_SECONDS)
-        st.rerun()
+        line = st.empty()
+        seen = batch.completed
+        with st.spinner("Batch running, one alert at a time..."):
+            status = batch.status
+            while status == "running" and batch.completed == seen:
+                line.caption(_batch_progress_line(batch, _runs()))
+                status = batch.wait(BATCH_POLL_SECONDS)
+        st.rerun()  # once: a run parked or finished, or the batch is done
+
+
+def _batch_progress_line(batch, runs: dict) -> str:
+    """``Investigating ALERT_003 (2 of 6) · 4 model calls · 7,210 in / 310 out · 41 s``."""
+    current = getattr(batch, "current", None)
+    if not current:
+        return f"Batch: {batch.completed} of {batch.total} started. One alert investigates at a time."
+    parts = [f"Investigating {current} ({batch.completed + 1} of {batch.total})"]
+    run = runs.get(current)
+    meter = getattr(run, "meter", None)
+    snap = meter.snapshot() if meter is not None else None
+    if snap:
+        calls = snap.get("llm_requests", 0)
+        parts.append(f"{calls} model call{'s' if calls != 1 else ''}")
+        parts.append(f"{snap.get('tokens_in', 0):,} in / {snap.get('tokens_out', 0):,} out")
+    started = getattr(run, "started", None)
+    if started:
+        parts.append(f"{int(time.time() - started)} s")
+    return " · ".join(parts)
 
 
 def _styled_queue(rows: list[dict[str, str]]):
