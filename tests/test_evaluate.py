@@ -197,7 +197,25 @@ def test_every_record_names_the_code_version(tmp_path):
     records = _records(tmp_path)
     assert records
     for record in records:
-        assert re.fullmatch(r"[0-9a-f]{7,40}", record["commit"]), record["commit"]
+        assert re.fullmatch(r"[0-9a-f]{7,40}(\+dirty)?", record["commit"]), record["commit"]
+
+
+def test_eval_commit_stamp_is_dirty_when_the_tree_is_dirty(tmp_path, monkeypatch):
+    """Fix 5 (2026-10-23): a score from uncommitted code is marked, like the
+    orchestrator's audit line (``commit`` gets a ``+dirty`` suffix)."""
+    monkeypatch.setattr(evaluate, "_git_short_hash", lambda: "deadbee")
+    monkeypatch.setattr(evaluate, "_tree_is_dirty", lambda: True)
+    _run(tmp_path, _truth_runner())
+    records = _records(tmp_path)
+    assert records
+    assert {record["commit"] for record in records} == {"deadbee+dirty"}
+
+
+def test_eval_commit_stamp_is_plain_on_a_clean_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(evaluate, "_git_short_hash", lambda: "deadbee")
+    monkeypatch.setattr(evaluate, "_tree_is_dirty", lambda: False)
+    _run(tmp_path, _truth_runner())
+    assert {record["commit"] for record in _records(tmp_path)} == {"deadbee"}
 
 
 def test_eval_reviewer_approves_steps_and_cancels_questions():
@@ -652,7 +670,10 @@ def test_server_and_connection_errors_skip_the_run_and_continue(tmp_path):
     assert len(_records(tmp_path)) == 30
 
 
-def test_subset_run_reports_against_the_full_plan(tmp_path):
+def test_subset_run_reports_against_its_own_plan(tmp_path):
+    """Fix 3 (2026-10-23): a subset run's report is scoped to the alerts it
+    ran, not all 10 (``eval/rerun/results.md`` said "0 of 30" for an 8-run
+    plan). ``pending`` still counts the full 30-run plan."""
     first = _alerts()[0]
     summary = evaluate.run_evaluation(
         _alerts(), _gt(), _truth_runner(),
@@ -662,7 +683,10 @@ def test_subset_run_reports_against_the_full_plan(tmp_path):
     )
     assert len(_records(tmp_path)) == 1
     assert summary.pending == 29
-    assert "1 of 30" in (tmp_path / "results.md").read_text()
+    text = (tmp_path / "results.md").read_text()
+    assert "1 of 1" in text
+    assert "1 of 30" not in text
+    assert "- **Alerts:** 1 synthetic Entra ID alerts" in text
 
 
 # --- splitting the evaluation between two people -----------------------------

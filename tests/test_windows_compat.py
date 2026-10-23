@@ -89,6 +89,16 @@ def test_cli_reconfigures_stdout_to_utf8():
     assert 'sys.stdout.reconfigure(encoding="utf-8"' in text
 
 
+def test_check_progress_reconfigures_stdout_to_utf8():
+    """Windows CI crashed printing a subject's arrow to cp1252 stdout
+    (2026-10-23, commit c9f13d8): a UnicodeEncodeError on '\u2192'. The
+    checker must set its own stdout to UTF-8, like the CLI and the re-run
+    runner; the subprocess ``encoding=`` fix only covers decoding git's output.
+    """
+    text = (PROJECT_ROOT / "scripts" / "check_progress.py").read_text(encoding="utf-8")
+    assert 'sys.stdout.reconfigure(encoding="utf-8"' in text
+
+
 def test_readme_has_windows_setup_and_whisper_lines():
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert ".venv\\Scripts\\activate" in text, "README has no Windows venv activation line"
