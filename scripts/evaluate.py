@@ -53,7 +53,7 @@ from itdr_agent.adjudicator import (  # noqa: E402
 )
 from itdr_agent.human import ScriptedReviewer  # noqa: E402
 from itdr_agent.investigator import MAX_TOOL_CALLS, Investigator  # noqa: E402
-from itdr_agent.orchestrator import Orchestrator  # noqa: E402
+from itdr_agent.orchestrator import Orchestrator, _git_short_hash  # noqa: E402
 from itdr_agent.usage import TokenMeter  # noqa: E402
 
 # Gemma 4 31B (free) was rate-limited upstream on 2026-10-12; Joe switched the
@@ -421,6 +421,8 @@ def run_evaluation(
     interruptions_path = eval_dir / "interruptions.jsonl"
 
     day = today()
+    # The code version for every record in this session (open problem #17).
+    commit = _git_short_hash()
     state = _load_state(state_path)
     used = state.get("requests_today", 0) if state.get("day") == day else 0
     budget = RequestBudget(daily_budget, used, clock=clock, sleep=sleep)
@@ -456,6 +458,7 @@ def run_evaluation(
                 "run_id": run_id,
                 "model": model,
                 "day": day,
+                "commit": commit,
             }
             try:
                 result = runner(alert, run_index, run_id, budget)
