@@ -68,6 +68,8 @@ def _tree_is_dirty(repo: Path = PROJECT_ROOT) -> bool:
             ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=no"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception:  # git missing, not a repo, or timeout: treat as clean
@@ -82,6 +84,8 @@ def _git_short_hash(repo: Path = PROJECT_ROOT) -> str:
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception:
