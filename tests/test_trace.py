@@ -419,6 +419,41 @@ def test_trace_records_per_request_tokens_from_the_meter(tmp_path):
     assert adjudication[0]["tokens_out"] == 10
 
 
+def test_trace_records_reasoning_tokens_from_the_meter(tmp_path):
+    """OpenRouter's reasoning_tokens land per request (open problem #16)."""
+    meter = TokenMeter()
+
+    class ReasoningCompleteLLM:
+        def __init__(self) -> None:
+            self.responses = [_report()]
+            self.messages: list[list[dict]] = []
+
+        def complete(self, messages: list[dict]) -> str:
+            self.messages.append(messages)
+            meter.add(SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=10,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=250),
+            ))
+            return self.responses.pop(0)
+
+    orch = Orchestrator(
+        make_investigator(),
+        Adjudicator(ReasoningCompleteLLM()),
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        mode="mock",
+        dirty=False,
+        model="test/model",
+        token_meter=meter,
+    )
+    orch.run(ALERT, run_id="r-reasoning")
+
+    payload = json.loads((tmp_path / "runs" / "r-reasoning.json").read_text())
+    adjudication = [r for r in payload["llm_requests"] if r["stage"] == "adjudication"]
+    assert adjudication[0]["reasoning_tokens"] == 250
+
+
 # --- Review 2026-10-21 finding 4: the guard's baseline calls are visible -----
 
 

@@ -37,6 +37,15 @@ def _usage(prompt: int, completion: int) -> SimpleNamespace:
     return SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion)
 
 
+def _usage_with_reasoning(prompt: int, completion: int, reasoning: int) -> SimpleNamespace:
+    """OpenRouter puts hidden reasoning in completion_tokens_details."""
+    return SimpleNamespace(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=reasoning),
+    )
+
+
 def _reply(content: str, usage) -> SimpleNamespace:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
@@ -67,9 +76,51 @@ def test_meter_adds_up_calls():
     assert meter.snapshot() == {
         "tokens_in": 150,
         "tokens_out": 25,
+        "reasoning_tokens": 0,
         "llm_requests": 2,
         "requests_without_usage": 0,
     }
+
+
+def test_meter_counts_reasoning_tokens():
+    meter = TokenMeter()
+    meter.add(_usage_with_reasoning(100, 200, 150))
+    meter.add(_usage_with_reasoning(50, 80, 40))
+    snap = meter.snapshot()
+    assert snap["reasoning_tokens"] == 190
+    assert snap["tokens_out"] == 280  # completion still includes the reasoning
+
+
+def test_reasoning_defaults_to_zero_when_absent():
+    meter = TokenMeter()
+    meter.add(_usage(100, 20))
+    meter.add(None)
+    assert meter.snapshot()["reasoning_tokens"] == 0
+
+
+def test_reasoning_reads_a_dict_details_block():
+    meter = TokenMeter()
+    meter.add(SimpleNamespace(
+        prompt_tokens=1,
+        completion_tokens=2,
+        completion_tokens_details={"reasoning_tokens": 42},
+    ))
+    assert meter.snapshot()["reasoning_tokens"] == 42
+
+
+def test_format_tokens_shows_reasoning_when_present():
+    line = format_tokens({"tokens_in": 9540, "tokens_out": 1274,
+                          "reasoning_tokens": 860,
+                          "llm_requests": 5, "requests_without_usage": 0})
+    assert line == "Tokens: 9,540 in / 1,274 out (860 reasoning) across 5 model calls"
+
+
+def test_format_tokens_omits_reasoning_when_zero():
+    assert format_tokens({"tokens_in": 10, "tokens_out": 1,
+                          "reasoning_tokens": 0,
+                          "llm_requests": 1, "requests_without_usage": 0}) == (
+        "Tokens: 10 in / 1 out across 1 model call"
+    )
 
 
 def test_missing_usage_is_counted_not_hidden():
