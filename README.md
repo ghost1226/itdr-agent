@@ -252,7 +252,11 @@ python scripts/evaluate.py --live                    # real model; run once per 
 python scripts/evaluate.py --live --alerts ALERT_001 ALERT_002   # only some alerts
 python scripts/evaluate.py --live --eval-dir eval/partner        # a second person's half
 python scripts/evaluate.py --combine eval eval/partner           # merge into eval/final/
+python scripts/rerun.py --dry-run                    # offline check of the re-run plan
+python scripts/rerun.py --live                       # ALERT_006 x3, ALERT_004 x3, ALERT_009, ALERT_010
 ```
+
+`scripts/rerun.py` is the one-command re-check of the four post-fix alerts (the two model misses and the two guard cases). It shares the same daily budget and resume state as the evaluation, writes `eval/rerun/`, and prints each alert's per-run verdict against the ground truth.
 
 A bare `python scripts/evaluate.py` refuses to run, so free requests are never spent by accident. Each session stays under 45 requests (worst case reserved before each run), and stops cleanly on a rate limit. The next session picks up where it stopped.
 
