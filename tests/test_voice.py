@@ -219,6 +219,50 @@ def test_typed_run_all_starts_the_batch(audit):
     assert _statuses(at)["ALERT_001"] == "Waiting on you"
 
 
+# --- severity and checked batches (Joe, 2026-10-23) --------------------------
+# "z run all high alerts" used to match "all" and run everything.
+
+
+@pytest.mark.parametrize(
+    "text,level",
+    [
+        ("z run all high alerts", "high"),
+        ("z run all medium alerts", "medium"),
+        ("z run all low alerts", "low"),
+        ("z run all none alerts", "none"),
+        ("z run the high ones", "high"),
+    ],
+)
+def test_run_level(text, level):
+    cmd = parse_command(text)
+    assert cmd.action == "run_level" and cmd.text == level
+
+
+@pytest.mark.parametrize("text", ["z run all checked alerts", "z run checked", "z run the selected alerts"])
+def test_run_checked(text):
+    assert parse_command(text).action == "run_checked"
+
+
+def test_plain_run_all_still_runs_everything():
+    assert parse_command("z run all").action == "run_all"
+    assert parse_command("z run all alerts").action == "run_all"
+
+
+def test_typed_run_all_high_alerts_starts_only_the_high_ones(audit):
+    at = _say(_app(), "z run all high alerts")
+    batch = at.session_state["batch"]
+    assert batch.total == 4
+    assert sorted(at.session_state["runs"]) == ["ALERT_001", "ALERT_003", "ALERT_004", "ALERT_005"]
+    assert "4 high alerts" in _page_text(at)
+    batch.wait(20)
+
+
+def test_typed_run_all_checked_alerts_with_nothing_checked_says_so(audit):
+    at = _say(_app(), "z run all checked alerts")
+    assert "batch" not in at.session_state
+    assert "checked" in _page_text(at).lower()
+
+
 def test_typed_open_alert_shows_the_run_page(audit):
     at = _say(_app(), "z open alert 3")
     assert "ALERT_003" in _page_text(at)
