@@ -112,3 +112,50 @@ def test_no_unix_only_strftime_flags():
     for path in list((PROJECT_ROOT / "itdr_agent").glob("*.py")) + [PROJECT_ROOT / "app.py"]:
         text = path.read_text(encoding="utf-8")
         assert not re.search(r"%-[a-zA-Z]", text), f"{path.name} uses a %-x strftime flag"
+
+
+# --- subprocess output is decoded as UTF-8, not the Windows ANSI codepage ----
+# ``text=True`` with no ``encoding`` uses ``locale.getpreferredencoding(False)``,
+# which is cp1252 on Windows. Git writes commit subjects in UTF-8, so a subject
+# with a byte cp1252 leaves undefined (the same 0x8f that broke the app.py test
+# read) raises ``UnicodeDecodeError``: uncaught in ``check_progress.py`` (it
+# would fail CI's last step), swallowed as "clean" in
+# ``orchestrator._tree_is_dirty`` (the run's commit would lose its ``+dirty``).
+SUBPROCESS_FILES = (
+    sorted((PROJECT_ROOT / "itdr_agent").glob("*.py"))
+    + sorted((PROJECT_ROOT / "scripts").glob("*.py"))
+    + [PROJECT_ROOT / "app.py"]
+)
+
+
+def _subprocess_text_calls(path: Path) -> list[ast.Call]:
+    """``subprocess.run/Popen/check_output/check_call`` in text mode."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = (
+            node.func.attr if isinstance(node.func, ast.Attribute)
+            else node.func.id if isinstance(node.func, ast.Name) else ""
+        )
+        if name not in ("run", "Popen", "check_output", "check_call"):
+            continue
+        keywords = {kw.arg for kw in node.keywords}
+        if keywords & {"text", "universal_newlines", "encoding"}:
+            found.append(node)
+    return found
+
+
+def test_subprocess_text_calls_pass_an_explicit_encoding():
+    found = 0
+    for path in SUBPROCESS_FILES:
+        rel = path.relative_to(PROJECT_ROOT)
+        for call in _subprocess_text_calls(path):
+            found += 1
+            kwargs = {kw.arg: ast.unparse(kw.value) for kw in call.keywords}
+            assert kwargs.get("encoding") == "'utf-8'", (
+                f"{rel}:{call.lineno} decodes subprocess output with the locale "
+                "encoding (cp1252 on Windows); pass encoding='utf-8'"
+            )
+    assert found == 3, f"expected the 3 known git calls, found {found}"
