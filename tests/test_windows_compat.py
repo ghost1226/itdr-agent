@@ -102,3 +102,13 @@ def test_ci_workflow_runs_the_suite_on_windows():
     assert "ubuntu-latest" in text
     assert "pytest" in text
     assert "secrets." not in text, "the suite needs no key; CI must not pass one"
+
+
+def test_no_unix_only_strftime_flags():
+    """``%-d`` (no-padding) is glibc/BSD only; Windows strftime raises on it.
+    The partner hit this on 2026-10-22 (``19fec28``); use ``.day`` instead."""
+    import re
+
+    for path in list((PROJECT_ROOT / "itdr_agent").glob("*.py")) + [PROJECT_ROOT / "app.py"]:
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"%-[a-zA-Z]", text), f"{path.name} uses a %-x strftime flag"
