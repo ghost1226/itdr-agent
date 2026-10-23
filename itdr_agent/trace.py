@@ -36,6 +36,7 @@ class RunTrace:
         self._meter = meter
         self.tool_calls: list[dict[str, Any]] = []
         self.llm_requests: list[dict[str, Any]] = []
+        self.llm_replies: list[dict[str, Any]] = []
         self.analyst_answers: list[dict[str, Any]] = []
         self.error: str | None = None
 
@@ -70,6 +71,24 @@ class RunTrace:
         """The run failed; keep the class name and the message (capped)."""
         message = str(exc)
         self.error = f"{type(exc).__name__}: {message}"[:600] if message else type(exc).__name__
+
+    def record_llm_reply(
+        self, stage: str, finish_reason: str, sample: str
+    ) -> None:
+        """Every model reply, success or failure (2026-10-23).
+
+        The bad-reply retry kept the finish reason and a sample only when both
+        tries failed, so a run that worked left no evidence of what the route
+        sent. ``sample`` is the reply's first 300 characters -- evidence, never
+        the whole reply.
+        """
+        self.llm_replies.append(
+            {
+                "stage": stage,
+                "finish_reason": finish_reason,
+                "sample": (sample or "")[:300],
+            }
+        )
 
     def record_analyst_answer(self, result: Any) -> None:
         self.analyst_answers.append(
@@ -110,6 +129,7 @@ class RunTrace:
             "alert_id": self.alert_id,
             "tool_calls": self.tool_calls,
             "llm_requests": self.llm_requests,
+            "llm_replies": self.llm_replies,
             "dossier": (
                 dossier.model_dump(mode="json") if dossier is not None else None
             ),

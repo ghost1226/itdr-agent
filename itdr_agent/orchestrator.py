@@ -242,6 +242,7 @@ class Orchestrator:
         for target in (self.investigator, self.adjudicator):
             if hasattr(target, "trace"):
                 target.trace = self._trace
+            self._wire_llm_reply_hook(target)
         if hasattr(self.adjudicator, "baseline_calls"):
             self.adjudicator.baseline_calls = 0
 
@@ -338,6 +339,16 @@ class Orchestrator:
             self._trace.write(trace_path, dossier=dossier, report=report)
 
     # --- internals ---------------------------------------------------------
+
+    def _wire_llm_reply_hook(self, agent: Any) -> None:
+        """Point the agent's LLM at the trace so every model reply is logged.
+
+        The OpenRouter wrappers accept an optional ``on_reply`` callable; the
+        test LLMs have no such hook and are skipped (2026-10-23).
+        """
+        llm = getattr(agent, "llm", None)
+        if llm is not None and hasattr(llm, "on_reply"):
+            llm.on_reply = self._trace.record_llm_reply
 
     def _check_deadline(self, run_id: str, alert_id: str, stage: str) -> None:
         if self.clock() >= self._deadline:

@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from . import config
 from .adjudicator import DEFAULT_MODEL, Adjudicator
@@ -114,6 +114,7 @@ class _OpenRouterInvestigatorLLM:
     def __init__(
         self, api_key: str, model: str, timeout: int,
         meter: TokenMeter | None = None,
+        on_reply: Callable[..., None] | None = None,
     ) -> None:
         from openai import OpenAI
 
@@ -124,6 +125,9 @@ class _OpenRouterInvestigatorLLM:
         )
         self.model = model
         self.meter = meter
+        # Called with (stage, finish_reason, sample) for every attempt,
+        # success or failure; the orchestrator points it at the run trace.
+        self.on_reply = on_reply
 
     def next_action(self, messages: list[dict]) -> dict[str, Any]:
         attempts: list[tuple[str, str]] = []
@@ -140,6 +144,9 @@ class _OpenRouterInvestigatorLLM:
                 self.meter.add(getattr(response, "usage", None))
             content, finish = _json_text(response)
             attempts.append((content, finish))
+            hook = getattr(self, "on_reply", None)
+            if hook is not None:
+                hook("investigation", finish, content[:300])
             found = _json_in(content)
             if found is not None:
                 return json.loads(found)
@@ -150,6 +157,7 @@ class _OpenRouterAdjudicatorLLM:
     def __init__(
         self, api_key: str, model: str, timeout: int,
         meter: TokenMeter | None = None,
+        on_reply: Callable[..., None] | None = None,
     ) -> None:
         from openai import OpenAI
 
@@ -160,6 +168,9 @@ class _OpenRouterAdjudicatorLLM:
         )
         self.model = model
         self.meter = meter
+        # Called with (stage, finish_reason, sample) for every attempt,
+        # success or failure; the orchestrator points it at the run trace.
+        self.on_reply = on_reply
 
     def complete(self, messages: list[dict]) -> str:
         from .adjudicator import _strip_code_fences
@@ -178,6 +189,9 @@ class _OpenRouterAdjudicatorLLM:
                 self.meter.add(getattr(response, "usage", None))
             content, finish = _json_text(response)
             attempts.append((content, finish))
+            hook = getattr(self, "on_reply", None)
+            if hook is not None:
+                hook("adjudication", finish, content[:300])
             found = _json_in(content, _strip_code_fences)
             if found is not None:
                 # Unchanged when the reply parses as sent (fences included: the
