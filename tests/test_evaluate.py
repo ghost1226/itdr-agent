@@ -8,6 +8,7 @@ resume, failure-row, and metric logic can be checked exactly.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -184,6 +185,19 @@ def test_each_record_has_required_fields_and_unique_run_id(tmp_path):
         assert record["llm_requests"] == 7
         assert record["tokens_in"] == 700 and record["tokens_out"] == 70
     assert len({r["run_id"] for r in records}) == 30
+
+
+def test_every_record_names_the_code_version(tmp_path):
+    """Open problem #17 (2026-10-23): a score must be tied to a commit.
+
+    ``raw.jsonl`` carried the model and the day but no code version, so a
+    locked result could not be reproduced against a known commit.
+    """
+    _run(tmp_path, _truth_runner())
+    records = _records(tmp_path)
+    assert records
+    for record in records:
+        assert re.fullmatch(r"[0-9a-f]{7,40}", record["commit"]), record["commit"]
 
 
 def test_eval_reviewer_approves_steps_and_cancels_questions():
