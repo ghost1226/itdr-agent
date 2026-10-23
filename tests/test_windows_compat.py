@@ -27,6 +27,7 @@ WRITING_FILES = [
     "itdr_agent/orchestrator.py",
     "itdr_agent/trace.py",
     "scripts/evaluate.py",
+    "scripts/test_cases_table.py",
 ]
 WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
 
@@ -72,7 +73,7 @@ def test_every_text_write_passes_newline_lf():
                 f"{rel}:{call.lineno} text write without newline='\\n' "
                 "(Windows would write \\r\\n)"
             )
-    assert found == 7, f"expected the 7 known text writes, found {found}"
+    assert found == 8, f"expected the 8 known text writes, found {found}"
 
 
 def test_fixtures_regenerate_with_lf_only(tmp_path):
