@@ -40,6 +40,7 @@ class FakeClient:
 
     def _create(self, **kwargs):
         self.calls += 1
+        self.last_messages = list(kwargs.get("messages") or [])
         return self.replies.pop(0)
 
 
@@ -111,3 +112,64 @@ def test_trace_keeps_the_error_message():
     trace.record_error(cli.BadReplyError("model reply was not JSON twice (finish_reason=content_filter)"))
     assert trace.error.startswith("BadReplyError: model reply was not JSON twice")
     assert "content_filter" in trace.error
+
+
+# --- embedded JSON and the corrective retry (the 2026-10-23 Opus reruns) -----
+# Real replies from logs/runs: ALERT_009 put a sentence before the JSON;
+# ALERT_003 wrote its wrap-up as markdown instead of {"action": "final"}.
+# Resending the same prompt at temperature 0 returned the same text, so the
+# retry has to say what was wrong.
+
+REPLY_009 = (
+    "Directory audits came back empty. Next I'll check the trust and compliance "
+    "status of the one device seen in the sign-ins.\n\n"
+    '{"action": "tool", "tool": "get_device_trust", '
+    '"arguments": {"device_id": "5a0a0add-c992-c017-3cbd-1eec0e3c3648"}}'
+)
+REPLY_003 = (
+    "I have enough evidence, so I'm ending the investigation here. All five tools "
+    "have been used and the three devices in the sign-in history have been checked."
+    "\n\n**What points to compromise:**\n- **Anonymized IP:** The alerting sign-in "
+    "came from 185.220.101.9, which is flagged as anonymized."
+)
+
+
+def test_investigator_takes_the_json_object_embedded_in_prose_without_a_retry():
+    llm = _wrapper(cli._OpenRouterInvestigatorLLM, [_reply(REPLY_009)])
+    action = llm.next_action([{"role": "user", "content": "x"}])
+    assert action["tool"] == "get_device_trust"
+    assert action["arguments"]["device_id"].startswith("5a0a0add")
+    assert llm.client.calls == 1
+
+
+def test_investigator_retry_tells_the_model_to_send_json_only():
+    llm = _wrapper(cli._OpenRouterInvestigatorLLM, [
+        _reply(REPLY_003),
+        _reply('{"action": "final"}'),
+    ])
+    assert llm.next_action([{"role": "user", "content": "x"}]) == {"action": "final"}
+    assert llm.client.calls == 2
+    nudge = llm.client.last_messages[-1]
+    assert nudge["role"] == "user"
+    assert "JSON" in nudge["content"] and '{"action": "final"}' in nudge["content"]
+
+
+def test_first_json_object_handles_braces_inside_strings():
+    text = 'note {"a": "x } y", "b": {"c": 1}} trailing {'
+    assert cli._first_json_object(text) == '{"a": "x } y", "b": {"c": 1}}'
+    assert cli._first_json_object("no json here") is None
+    assert cli._first_json_object("{unbalanced") is None
+
+
+def test_adjudicator_takes_the_embedded_report_and_retries_with_the_nudge():
+    llm = _wrapper(cli._OpenRouterAdjudicatorLLM, [
+        _reply('Here is my report:\n{"verdict": "FALSE_POSITIVE"}\nLet me know.'),
+    ])
+    assert llm.complete([]) == '{"verdict": "FALSE_POSITIVE"}'
+    assert llm.client.calls == 1
+    llm = _wrapper(cli._OpenRouterAdjudicatorLLM, [
+        _reply("**Verdict:** false positive, see below."),
+        _reply('{"verdict": "FALSE_POSITIVE"}'),
+    ])
+    assert llm.complete([]) == '{"verdict": "FALSE_POSITIVE"}'
+    assert "JSON" in llm.client.last_messages[-1]["content"]
