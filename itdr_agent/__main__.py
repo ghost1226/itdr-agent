@@ -43,6 +43,64 @@ def _json_text(response: Any) -> tuple[str, str]:
     return (choice.message.content or ""), str(getattr(choice, "finish_reason", ""))
 
 
+def _first_json_object(text: str) -> str | None:
+    """The first balanced ``{...}`` in ``text``, or None (2026-10-23).
+
+    Opus sometimes writes a sentence before the JSON it was told to send
+    alone (ALERT_009). Braces inside JSON strings are skipped.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth, in_string, escaped = 0, False, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _json_in(content: str, strip_fences=None) -> str | None:
+    """``content`` itself if it parses (after fence stripping), else the first
+    embedded JSON object if that parses, else None."""
+    candidates = [strip_fences(content) if strip_fences else content]
+    embedded = _first_json_object(content)
+    if embedded is not None:
+        candidates.append(embedded)
+    for candidate in candidates:
+        try:
+            json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        return candidate
+    return None
+
+
+# Sent as one extra user turn on the retry: resending the same prompt at
+# temperature 0 returns the same prose (ALERT_003's markdown wrap-up).
+INVESTIGATOR_JSON_NUDGE = (
+    "Reply with only the JSON object, no prose before or after it. "
+    'If the investigation is done, reply {"action": "final"}.'
+)
+ADJUDICATOR_JSON_NUDGE = (
+    "Reply with only the JSON object for the report, no prose before or after it."
+)
+
+
 def _bad_reply(stage: str, attempts: list[tuple[str, str]]) -> BadReplyError:
     content, finish = attempts[-1]
     sample = content[:300] if content else "None"
@@ -69,10 +127,11 @@ class _OpenRouterInvestigatorLLM:
 
     def next_action(self, messages: list[dict]) -> dict[str, Any]:
         attempts: list[tuple[str, str]] = []
-        for _ in range(2):  # one retry on a reply that is not JSON
+        nudge = {"role": "user", "content": INVESTIGATOR_JSON_NUDGE}
+        for attempt in range(2):  # one retry, with the nudge, on a reply with no JSON
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages if attempt == 0 else [*messages, nudge],
                 temperature=0,
                 response_format={"type": "json_object"},
                 max_tokens=config.MAX_OUTPUT_TOKENS,
@@ -81,10 +140,9 @@ class _OpenRouterInvestigatorLLM:
                 self.meter.add(getattr(response, "usage", None))
             content, finish = _json_text(response)
             attempts.append((content, finish))
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                continue
+            found = _json_in(content)
+            if found is not None:
+                return json.loads(found)
         raise _bad_reply("investigator", attempts)
 
 
@@ -107,10 +165,11 @@ class _OpenRouterAdjudicatorLLM:
         from .adjudicator import _strip_code_fences
 
         attempts: list[tuple[str, str]] = []
-        for _ in range(2):  # one retry on a reply that is not JSON
+        nudge = {"role": "user", "content": ADJUDICATOR_JSON_NUDGE}
+        for attempt in range(2):  # one retry, with the nudge, on a reply with no JSON
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages if attempt == 0 else [*messages, nudge],
                 temperature=0,
                 response_format={"type": "json_object"},
                 max_tokens=config.MAX_OUTPUT_TOKENS,
@@ -119,11 +178,11 @@ class _OpenRouterAdjudicatorLLM:
                 self.meter.add(getattr(response, "usage", None))
             content, finish = _json_text(response)
             attempts.append((content, finish))
-            try:
-                json.loads(_strip_code_fences(content))  # the Adjudicator parses for real
-            except json.JSONDecodeError:
-                continue
-            return content
+            found = _json_in(content, _strip_code_fences)
+            if found is not None:
+                # Unchanged when the reply parses as sent (fences included: the
+                # Adjudicator strips them); the embedded object otherwise.
+                return content if found == _strip_code_fences(content) else found
         raise _bad_reply("adjudicator", attempts)
 
 
