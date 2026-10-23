@@ -102,7 +102,7 @@ def _truth_runner(requests_per_run=7, raise_on=None, calls=None):
     return run
 
 
-def _run(tmp_path, runner, *, budget=10_000, today=DAY_1, alerts=None, runs=3):
+def _run(tmp_path, runner, *, budget=10_000, today=DAY_1, alerts=None, runs=3, assisted=False):
     clock = FakeClock()
     summary = evaluate.run_evaluation(
         alerts if alerts is not None else _alerts(),
@@ -115,6 +115,7 @@ def _run(tmp_path, runner, *, budget=10_000, today=DAY_1, alerts=None, runs=3):
         today=lambda: today,
         clock=clock.clock,
         sleep=clock.sleep,
+        assisted=assisted,
     )
     return summary
 
@@ -687,6 +688,98 @@ def test_subset_run_reports_against_its_own_plan(tmp_path):
     assert "1 of 1" in text
     assert "1 of 30" not in text
     assert "- **Alerts:** 1 synthetic Entra ID alerts" in text
+
+
+# --- assisted scoring mode (Task D, 2026-10-23) -----------------------------
+# Open problem 6: the scripted reviewer cancels every question, so the
+# one-question path is never scored. --assisted answers from the scenario and
+# keeps those runs in their own row set.
+
+
+def test_assisted_choice_maps_each_scenario():
+    """Benign -> expected, attack -> suspicious, thin data -> don't know."""
+    assert evaluate.assisted_choice({"expected_verdict": "FALSE_POSITIVE"}) == 0
+    assert evaluate.assisted_choice({"expected_verdict": "COMPROMISED"}) == 1
+    assert evaluate.assisted_choice({"expected_verdict": "SUSPICIOUS"}) == 1
+    assert evaluate.assisted_choice({"expected_verdict": "INSUFFICIENT_DATA"}) == 2
+
+
+def test_assisted_choice_matches_the_real_ground_truth():
+    benign = {"benign_travel", "benign_admin_role", "benign_vpn"}
+    for alert_id, entry in _gt().items():
+        index = evaluate.assisted_choice(entry)
+        if entry["scenario"] in benign:
+            assert index == 0, alert_id
+        elif entry["expected_verdict"] in ("COMPROMISED", "SUSPICIOUS"):
+            assert index == 1, alert_id
+        else:
+            assert index == 2, alert_id
+
+
+def test_assisted_reviewer_answers_instead_of_cancelling():
+    from itdr_agent.human import ANALYST_OPTIONS
+
+    reviewer = evaluate.make_assisted_eval_reviewer({"expected_verdict": "FALSE_POSITIVE"})
+    answer = reviewer.ask("Is this expected?", [{"label": "x"}], True)
+    assert answer.status == "answered"
+    assert answer.choice_index == 0
+    assert answer.answer == ANALYST_OPTIONS[0]
+    assert reviewer.review_step(0, "Disable the account", "Re-enable").decision == "approve"
+
+
+def test_assisted_records_are_marked(tmp_path):
+    _run(tmp_path, _truth_runner(), assisted=True)
+    assert _records(tmp_path)
+    assert all(record["assisted"] is True for record in _records(tmp_path))
+
+
+def test_unassisted_records_are_marked_false(tmp_path):
+    _run(tmp_path, _truth_runner())
+    assert all(record["assisted"] is False for record in _records(tmp_path))
+
+
+def _record(alert_id, run, verdict, assisted):
+    return {
+        "alert_id": alert_id, "run": run, "verdict": verdict, "confidence": 0.9,
+        "mitre_techniques_observed": [], "dossier_mitre": [],
+        "short_circuited": False, "llm_requests": 7, "tokens_in": 100,
+        "tokens_out": 10, "seconds": 1.0, "error": None, "error_detail": None,
+        "narrative": "", "audit_notes": "", "day": "2026-10-12",
+        "assisted": assisted,
+    }
+
+
+def test_assisted_runs_are_a_separate_row_set(tmp_path):
+    gt = {
+        "ALERT_001": {
+            "scenario": "impossible_travel", "expected_verdict": "COMPROMISED",
+            "expected_mitre": [], "is_benign": False,
+        }
+    }
+    records = [
+        _record("ALERT_001", 1, "COMPROMISED", assisted=False),
+        _record("ALERT_001", 2, "FALSE_POSITIVE", assisted=True),
+    ]
+    path = tmp_path / "results.md"
+    evaluate.write_results_md(
+        path, records, [], gt, model="test/model", runs_per_alert=1,
+        daily_budget=45, dry_run=True,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "## Assisted runs (scripted reviewer answers the analyst question)" in text
+    headline, assisted = text.split("## Assisted runs", 1)
+    assert "FALSE_POSITIVE" not in headline  # the assisted run stays out
+    assert "FALSE_POSITIVE" in assisted
+
+
+def test_assisted_dry_run_writes_the_separate_section(tmp_path):
+    code = evaluate.main(["--dry-run", "--assisted", "--eval-dir", str(tmp_path)])
+    assert code == 0
+    records = _records(tmp_path / "dry_run")
+    assert records
+    assert all(record["assisted"] is True for record in records)
+    text = (tmp_path / "dry_run" / "results.md").read_text(encoding="utf-8")
+    assert "## Assisted runs" in text
 
 
 # --- splitting the evaluation between two people -----------------------------
