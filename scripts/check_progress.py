@@ -21,6 +21,14 @@ from pathlib import Path
 BASELINE = "d33eb1e"
 PROGRESS_NAME = "PROGRESS.md"
 
+# Windows: a redirected stdout may be cp1252, and a commit subject can carry a
+# character cp1252 cannot encode (Jessica's review, 2026-10-23: the "->" arrow
+# in a subject raised UnicodeEncodeError on CI, commit ``c9f13d8``). The
+# subprocess ``encoding=`` below only covers decoding git's output. Same guard
+# as ``itdr_agent/__main__.py`` and ``scripts/rerun.py``.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(

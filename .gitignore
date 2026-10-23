@@ -12,3 +12,5 @@ eval/**/audit.jsonl
 eval/**/audit-mock.jsonl
 # Per-run traces (synthetic data, local only)
 **/runs/
+# One-command re-run scratch (results land in PROGRESS.md, not the repo)
+eval/**/rerun/

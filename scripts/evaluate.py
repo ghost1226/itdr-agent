@@ -53,7 +53,11 @@ from itdr_agent.adjudicator import (  # noqa: E402
 )
 from itdr_agent.human import ScriptedReviewer  # noqa: E402
 from itdr_agent.investigator import MAX_TOOL_CALLS, Investigator  # noqa: E402
-from itdr_agent.orchestrator import Orchestrator, _git_short_hash  # noqa: E402
+from itdr_agent.orchestrator import (  # noqa: E402
+    Orchestrator,
+    _git_short_hash,
+    _tree_is_dirty,
+)
 from itdr_agent.usage import TokenMeter  # noqa: E402
 
 # Gemma 4 31B (free) was rate-limited upstream on 2026-10-12; Joe switched the
@@ -421,8 +425,12 @@ def run_evaluation(
     interruptions_path = eval_dir / "interruptions.jsonl"
 
     day = today()
-    # The code version for every record in this session (open problem #17).
+    # The code version for every record in this session (open problem #17);
+    # ``+dirty`` when the working tree is not the committed code (fix 5,
+    # 2026-10-23), matching the orchestrator's audit line.
     commit = _git_short_hash()
+    if _tree_is_dirty():
+        commit += "+dirty"
     state = _load_state(state_path)
     used = state.get("requests_today", 0) if state.get("day") == day else 0
     budget = RequestBudget(daily_budget, used, clock=clock, sleep=sleep)
@@ -525,14 +533,17 @@ def run_evaluation(
     interruptions = [
         r for r in _read_jsonl(interruptions_path) if r.get("model") == model
     ]
-    in_scope = {a["id"] for a in alerts}
+    in_scope = set(only) if only is not None else {a["id"] for a in alerts}
+    # A subset run reports against its own plan; a full run against the 3-run
+    # plan (fix 3, 2026-10-23: eval/rerun said "0 of 30" for an 8-run plan).
+    report_runs = runs_per_alert if only is not None else planned_runs
     write_results_md(
         eval_dir / "results.md",
         records,
         interruptions,
         {k: v for k, v in ground_truth.items() if k in in_scope},
         model=model,
-        runs_per_alert=planned_runs,
+        runs_per_alert=report_runs,
         daily_budget=daily_budget,
         dry_run=dry_run,
     )
