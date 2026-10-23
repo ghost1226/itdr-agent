@@ -897,7 +897,7 @@ def write_fixtures(
     written: dict[str, Path] = {}
     for name, records in dataset.items():
         path = out_path / f"{name}.jsonl"
-        with path.open("w", encoding="utf-8") as handle:
+        with path.open("w", encoding="utf-8", newline="\n") as handle:
             for record in records:
                 handle.write(json.dumps(record) + "\n")
         written[name] = path

@@ -624,5 +624,5 @@ class Orchestrator:
 
     def _append(self, run_id: str, entry: dict[str, Any]) -> None:
         entry = {"run_id": run_id, **entry}
-        with self.audit_log.open("a", encoding="utf-8") as handle:
+        with self.audit_log.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(entry, default=str) + "\n")

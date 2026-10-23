@@ -1,0 +1,3 @@
+# Checked out with LF everywhere so a Windows clone matches the committed
+# fixtures byte for byte (the code also writes LF on every OS).
+* text=auto eol=lf

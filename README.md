@@ -14,6 +14,8 @@ It runs on synthetic Entra ID data (fake `@contoso.com` tenant), not a real tena
 
 Built and tested on Python 3.14.
 
+macOS / Linux:
+
 ```bash
 git clone https://github.com/ghost1226/itdr-agent.git
 cd itdr-agent
@@ -22,10 +24,23 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Windows (PowerShell or Command Prompt; `py` is the Python launcher that comes with python.org's installer):
+
+```powershell
+git clone https://github.com/ghost1226/itdr-agent.git
+cd itdr-agent
+py -3.14 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Git must be installed on either OS: every run records the current commit hash in its trace, and the tests create throwaway repos. Line endings are forced to LF by `.gitattributes`, and the code writes LF on every OS, so the committed fixtures regenerate byte for byte on Windows too. The suite runs on both `windows-latest` and `ubuntu-latest` in GitHub Actions (`.github/workflows/tests.yml`).
+
 ### Configure `.env`
 
 ```bash
-cp .env.example .env
+cp .env.example .env        # macOS / Linux
+copy .env.example .env      # Windows
 ```
 
 Then edit `.env`:
@@ -114,9 +129,11 @@ The **Voice command** box on every page has a mic button and a typed fallback. A
 Start the Whisper server once (the sidebar says whether it is reachable; typed commands work without it):
 
 ```bash
-brew install whisper-cpp   # once; then download the model into ~/whisper-models/
+brew install whisper-cpp   # macOS, once; then download the model into ~/whisper-models/
 whisper-server --host 127.0.0.1 --port 2022 -m ~/whisper-models/ggml-small.en.bin --inference-path /v1/audio/transcriptions
 ```
+
+On Windows, download `whisper-bin-x64.zip` from a build-numbered whisper.cpp release (github.com/ggml-org/whisper.cpp/releases, tags like b5454; the v1.9.x tags carry no binaries), unzip it, put `ggml-small.en.bin` next to it, and run the same command with `whisper-server.exe` and the model's Windows path (for example `-m C:\whisper-models\ggml-small.en.bin`). The mic button itself is the browser's recorder, so it works on any OS.
 
 `WHISPER_URL` in `.env` overrides the default `http://127.0.0.1:2022/v1/audio/transcriptions`.
 

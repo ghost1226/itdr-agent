@@ -125,5 +125,6 @@ class RunTrace:
         path.write_text(
             json.dumps(self.to_dict(dossier, report), indent=2, default=str),
             encoding="utf-8",
+            newline="\n",
         )
         return path

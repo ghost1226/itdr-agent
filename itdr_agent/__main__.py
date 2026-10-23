@@ -21,6 +21,12 @@ from .investigator import Investigator
 from .orchestrator import Orchestrator
 from .usage import TokenMeter, format_tokens
 
+# Windows: a redirected stdout (``> dossier.json``) may be cp1252, and the
+# model's narrative is free text. UTF-8 keeps a non-ASCII character from
+# crashing the run. A real console is already UTF-8 on every OS.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 class _OpenRouterInvestigatorLLM:
     def __init__(

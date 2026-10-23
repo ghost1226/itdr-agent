@@ -387,11 +387,12 @@ def _save_state(path: Path, day: str, used: int, model: str) -> None:
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(record, default=str) + "\n")
         handle.flush()
 
@@ -895,7 +896,7 @@ def write_results_md(
         "an analyst approves.",
         "",
     ]
-    Path(path).write_text("\n".join(lines), encoding="utf-8")
+    Path(path).write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
 # --- CLI -------------------------------------------------------------------------
@@ -1040,6 +1041,7 @@ def _combine(
         (out_dir / filename).write_text(
             "".join(json.dumps(row, default=str) + "\n" for row in rows),
             encoding="utf-8",
+            newline="\n",
         )
     write_results_md(
         out_dir / "results.md", records, interruptions, ground_truth,
