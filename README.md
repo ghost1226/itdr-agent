@@ -72,7 +72,7 @@ The 10 alerts: 5 attacks (impossible travel, MFA fatigue, anonymous IP, app cons
 pytest
 ```
 
-550 tests, no network, no API key needed. The model is mocked in every unit test.
+637 tests, no network, no API key needed. The model is mocked in every unit test.
 
 ## Run the demo
 
@@ -236,6 +236,7 @@ Full results: [`eval/final/results.md`](eval/final/results.md) (both halves comb
 - **Runs:** all 10 alerts x 3 runs each = 30 runs, each through the full orchestrator, split across two people's free accounts.
 - **Scoring:** a scripted reviewer approves every step and cancels every question, so the numbers show the agent without analyst help.
 - **Metrics:** exact verdict accuracy (failed runs count as wrong), majority-of-3 per alert, attack-vs-benign detection, false positives, MITRE precision and recall, run-to-run agreement, and tokens, seconds, and requests per run.
+- **Provenance (added 2026-10-23):** each `raw.jsonl` record carries the model, the UTC day, and the code version (short commit hash), so a score can be tied back to the commit that produced it. The locked 30-run `eval/final/` predates this field; the re-runs record it.
 
 **Results: 30 of 30 runs, 0 failed.** Exact verdict accuracy 80.0%, majority-of-3 80% (8 of 10 alerts), attack-vs-benign detection 100%, 0 of 9 benign runs flagged, MITRE precision 100% and recall 83.3%, agreement 93.3%, about 44 seconds per run. Two alerts were wrong by majority. On the thin-data alert, the model said FALSE_POSITIVE at 0.90+ confidence in all 3 runs instead of INSUFFICIENT_DATA; it treated missing evidence as proof that nothing happened. On the app-consent alert, it said SUSPICIOUS in 2 of 3 runs because the Investigator didn't pull the consent record. The full write-up is in the brief.
 
