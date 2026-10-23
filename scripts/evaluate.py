@@ -51,7 +51,11 @@ from itdr_agent.adjudicator import (  # noqa: E402
     AdjudicatorParseError,
     UnsupportedMitreClaimError,
 )
-from itdr_agent.human import ScriptedReviewer  # noqa: E402
+from itdr_agent.human import (  # noqa: E402
+    ANALYST_OPTIONS,
+    AskUserResult,
+    ScriptedReviewer,
+)
 from itdr_agent.investigator import MAX_TOOL_CALLS, Investigator  # noqa: E402
 from itdr_agent.orchestrator import (  # noqa: E402
     Orchestrator,
@@ -176,6 +180,44 @@ def make_eval_reviewer() -> ScriptedReviewer:
     return ScriptedReviewer()
 
 
+def assisted_choice(entry: dict[str, Any]) -> int:
+    """The index into human.ANALYST_OPTIONS for a scripted assisted answer.
+
+    From the ground-truth scenario: a benign scenario (benign travel, admin
+    role, VPN) says the activity is expected, an attack says it is suspicious,
+    and thin data / unknown says "I don't know". Open problem 6, Task D.
+    """
+    verdict = entry.get("expected_verdict")
+    if verdict == "FALSE_POSITIVE":
+        return 0
+    if verdict in ("COMPROMISED", "SUSPICIOUS"):
+        return 1
+    return 2
+
+
+def assisted_answer(entry: dict[str, Any]) -> AskUserResult:
+    index = assisted_choice(entry)
+    return AskUserResult(
+        status="answered",
+        answer=ANALYST_OPTIONS[index],
+        choice_index=index,
+        free_text=False,
+    )
+
+
+def make_assisted_eval_reviewer(entry: dict[str, Any]) -> ScriptedReviewer:
+    """Approves every step and answers the one question from the scenario."""
+    return ScriptedReviewer(answers=[assisted_answer(entry)])
+
+
+def _eval_reviewer(
+    assisted: bool, ground_truth: dict[str, dict] | None, alert_id: str
+) -> ScriptedReviewer:
+    if assisted and ground_truth is not None:
+        return make_assisted_eval_reviewer(ground_truth[alert_id])
+    return make_eval_reviewer()
+
+
 def make_openrouter_client(api_key: str, timeout: int):
     from openai import OpenAI
 
@@ -248,6 +290,8 @@ def make_live_runner(
     timeout: int,
     audit_log: Path,
     total_timeout: int | None = None,
+    ground_truth: dict[str, dict] | None = None,
+    assisted: bool = False,
 ):
     """``timeout`` caps each request (90 s); ``total_timeout`` caps a whole run."""
     client = make_openrouter_client(api_key, timeout)
@@ -260,7 +304,7 @@ def make_live_runner(
         orchestrator = Orchestrator(
             Investigator(_LiveInvestigatorLLM(client, model, budget, meter)),
             Adjudicator(_LiveAdjudicatorLLM(client, model, budget, meter)),
-            make_eval_reviewer(),
+            _eval_reviewer(assisted, ground_truth, alert["id"]),
             audit_log=audit_log,
             timeout_seconds=total,
             token_meter=meter,
@@ -292,7 +336,9 @@ class _OfflineReportLLM:
         return self.response
 
 
-def make_offline_runner(ground_truth: dict[str, dict], audit_log: Path):
+def make_offline_runner(
+    ground_truth: dict[str, dict], audit_log: Path, assisted: bool = False
+):
     """Dry run: the real orchestrator with scripted, offline model stand-ins.
 
     The stand-in Adjudicator answers with the ground-truth verdict, so dry-run
@@ -312,7 +358,7 @@ def make_offline_runner(ground_truth: dict[str, dict], audit_log: Path):
         orchestrator = Orchestrator(
             investigator,
             Adjudicator(_OfflineReportLLM(reply, budget)),
-            make_eval_reviewer(),
+            _eval_reviewer(assisted, ground_truth, alert_id),
             audit_log=audit_log,
             mode="offline",
             model="offline-dry-run",
@@ -415,6 +461,7 @@ def run_evaluation(
     sleep: Callable[[float], None] = time.sleep,
     dry_run: bool = False,
     only: set[str] | None = None,
+    assisted: bool = False,
 ) -> SessionSummary:
     """Run pending (alert, run) pairs; ``only`` limits this session to some
     alert ids while results and the pending count still cover every alert."""
@@ -436,7 +483,7 @@ def run_evaluation(
     budget = RequestBudget(daily_budget, used, clock=clock, sleep=sleep)
 
     done = {
-        (r["alert_id"], r["run"])
+        (r["alert_id"], r["run"], bool(r.get("assisted")))
         for r in _read_jsonl(raw_path)
         if r.get("model") == model
     }
@@ -445,7 +492,7 @@ def run_evaluation(
         for alert in alerts
         if only is None or alert["id"] in only
         for n in range(1, runs_per_alert + 1)
-        if (alert["id"], n) not in done
+        if (alert["id"], n, assisted) not in done
     ]
     planned_runs = max(runs_per_alert, RUNS_PER_ALERT)
 
@@ -467,6 +514,7 @@ def run_evaluation(
                 "model": model,
                 "day": day,
                 "commit": commit,
+                "assisted": assisted,
             }
             try:
                 result = runner(alert, run_index, run_id, budget)
@@ -537,6 +585,9 @@ def run_evaluation(
     # A subset run reports against its own plan; a full run against the 3-run
     # plan (fix 3, 2026-10-23: eval/rerun said "0 of 30" for an 8-run plan).
     report_runs = runs_per_alert if only is not None else planned_runs
+    # The summary counts the mode this call ran (assisted or not); the report
+    # gets every record so it can keep the assisted runs in their own row set.
+    mode_records = [r for r in records if bool(r.get("assisted")) == assisted]
     write_results_md(
         eval_dir / "results.md",
         records,
@@ -547,7 +598,7 @@ def run_evaluation(
         daily_budget=daily_budget,
         dry_run=dry_run,
     )
-    finished = {(r["alert_id"], r["run"]) for r in records}
+    finished = {(r["alert_id"], r["run"]) for r in mode_records}
     pending = sum(
         1
         for alert in alerts
@@ -756,6 +807,46 @@ def _num(value: float | None, digits: int = 1) -> str:
     return "n/a" if value is None else f"{value:.{digits}f}"
 
 
+def _assisted_rows(
+    records: list[dict[str, Any]],
+    ground_truth: dict[str, dict[str, Any]],
+    runs_per_alert: int,
+) -> list[str]:
+    """The assisted runs as their own row set, never merged into the headline."""
+    m = compute_metrics(records, ground_truth)
+    expected_runs = len(ground_truth) * runs_per_alert
+    lines = [
+        "",
+        "## Assisted runs (scripted reviewer answers the analyst question)",
+        "",
+        "Kept **separate** from the unassisted numbers above; they are never "
+        "mixed. The scripted reviewer answers the one question from the "
+        "ground-truth scenario: a benign scenario says the activity is expected, "
+        "an attack says it is suspicious, and thin data says it does not know.",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Runs complete | {m['total_runs']} of {expected_runs} "
+        f"({m['failed_runs']} failed) |",
+        f"| Exact verdict accuracy | {_pct(m['verdict_accuracy'])} |",
+        f"| Majority-of-{runs_per_alert} verdict accuracy | "
+        f"{_pct(m['majority_accuracy'])} |",
+        f"| MITRE precision | {_pct(m['mitre_precision'])} "
+        f"(TP {m['mitre_tp']}, FP {m['mitre_fp']}) |",
+        f"| MITRE recall | {_pct(m['mitre_recall'])} (FN {m['mitre_fn']}) |",
+        "",
+        "| Alert | Scenario | Expected | Run outcomes | Majority | Correct |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in m["per_alert"]:
+        lines.append(
+            f"| {row['alert_id']} | {row['scenario']} | {row['expected']} | "
+            f"{', '.join(row['outcomes'])} | {row['majority'] or 'tie'} | "
+            f"{'yes' if row['majority_correct'] else 'no'} |"
+        )
+    return lines
+
+
 def write_results_md(
     path: Path,
     records: list[dict[str, Any]],
@@ -768,7 +859,9 @@ def write_results_md(
     dry_run: bool,
     sources: dict[str, int] | None = None,
 ) -> None:
-    m = compute_metrics(records, ground_truth)
+    unassisted = [r for r in records if not r.get("assisted")]
+    assisted = [r for r in records if r.get("assisted")]
+    m = compute_metrics(unassisted, ground_truth)
     expected_runs = len(ground_truth) * runs_per_alert
     days = sorted({r.get("day") for r in records if r.get("day")})
     lines: list[str] = ["# ITDR Evaluation Results", ""]
@@ -807,6 +900,15 @@ def write_results_md(
         "- **Reviewer:** a scripted reviewer approves every containment step and "
         "cancels every `ask_user` question. No human is in the loop during "
         "scoring, so the one-question re-adjudication path is never exercised.",
+        *(
+            [
+                "- **Assisted reviewer (separate section below):** answers the "
+                "one question from the ground-truth scenario; those runs are "
+                "never mixed into the headline numbers."
+            ]
+            if assisted
+            else []
+        ),
         "- **Labels:** `data/fixtures/ground_truth.jsonl`, read only by this "
         "script and the tests; the agents never see it.",
         limits_line,
@@ -862,7 +964,7 @@ def write_results_md(
               "| Alert | Run | Verdict | Confidence | Techniques | Requests | "
               "Tokens in/out | Seconds | Error |",
               "|---|---|---|---|---|---|---|---|---|"]
-    for r in sorted(records, key=lambda x: (x["alert_id"], x["run"])):
+    for r in sorted(unassisted, key=lambda x: (x["alert_id"], x["run"])):
         lines.append(
             f"| {r['alert_id']} | {r['run']} | {r.get('verdict') or '-'} | "
             f"{_num(r.get('confidence'), 2)} | "
@@ -870,7 +972,7 @@ def write_results_md(
             f"{r.get('llm_requests')} | {r.get('tokens_in')}/{r.get('tokens_out')} | "
             f"{_num(r.get('seconds'), 1)} | {r.get('error') or '-'} |"
         )
-    rows = build_failure_rows(records, ground_truth)
+    rows = build_failure_rows(unassisted, ground_truth)
     lines += ["", "## Failure table", ""]
     if rows:
         lines += ["| Alert | Run | What went wrong | Why |", "|---|---|---|---|"]
@@ -892,6 +994,8 @@ def write_results_md(
         ]
     else:
         lines.append("None.")
+    if assisted:
+        lines += _assisted_rows(assisted, ground_truth, runs_per_alert)
     lines += [
         "",
         "## Caveats",
@@ -928,6 +1032,9 @@ def main(argv: list[str] | None = None) -> int:
                       "(for example yours and a partner's) into one report")
     parser.add_argument("--runs", type=int, default=RUNS_PER_ALERT)
     parser.add_argument("--alerts", nargs="+")
+    parser.add_argument("--assisted", action="store_true",
+                        help="score the one-question path: the scripted reviewer "
+                        "answers from the ground-truth scenario (dry-run for now)")
     parser.add_argument("--model", default=os.getenv("EVAL_MODEL", EVAL_DEFAULT_MODEL))
     parser.add_argument("--daily-budget", type=int, default=DEFAULT_DAILY_BUDGET)
     parser.add_argument("--eval-dir", default=None,
@@ -951,9 +1058,11 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(dry_dir)
         run_evaluation(
             alerts, ground_truth,
-            make_offline_runner(ground_truth, dry_dir / "audit.jsonl"),
+            make_offline_runner(ground_truth, dry_dir / "audit.jsonl",
+                                assisted=args.assisted),
             runs_per_alert=args.runs, eval_dir=dry_dir, model="offline-dry-run",
             daily_budget=10**9, sleep=lambda _s: None, dry_run=True, only=only,
+            assisted=args.assisted,
         )
         per_run = [r["llm_requests"] for r in _read_jsonl(dry_dir / "raw.jsonl")]
         total = sum(per_run)
@@ -986,9 +1095,10 @@ def main(argv: list[str] | None = None) -> int:
         alerts, ground_truth,
         make_live_runner(config.OPENROUTER_API_KEY, args.model, timeout,
                          eval_dir / "audit.jsonl",
-                         total_timeout=config.TIMEOUT_SECONDS),
+                         total_timeout=config.TIMEOUT_SECONDS,
+                         ground_truth=ground_truth, assisted=args.assisted),
         runs_per_alert=args.runs, eval_dir=eval_dir, model=args.model,
-        daily_budget=args.daily_budget, only=only,
+        daily_budget=args.daily_budget, only=only, assisted=args.assisted,
     )
     print(f"Runs finished this session: {summary.completed_this_session}")
     print(f"Runs still pending: {summary.pending}")
