@@ -735,3 +735,52 @@ def test_audit_log_skips_a_corrupt_line(audit):
     assert not at.exception, at.exception
     assert list(_audit_table(at)["Run"]) == ["ok"]
     assert "1 line skipped" in _page_text(at)
+
+
+# --- batch_progress: the queue updates in place while a batch runs ----------
+# (Joe, 2026-10-23: the page flashed every 2 s in live mode; he asked for a
+# loading line with a token counter instead.)
+
+
+def test_batch_progress_line_shows_alert_calls_tokens_seconds():
+    import time
+    from types import SimpleNamespace
+
+    import app as module
+
+    meter = SimpleNamespace(snapshot=lambda: {"llm_requests": 4, "tokens_in": 7210, "tokens_out": 310,
+                                              "requests_without_usage": 0})
+    run = SimpleNamespace(meter=meter, started=time.time() - 41)
+    batch = SimpleNamespace(current="ALERT_003", completed=1, total=6)
+    line = module._batch_progress_line(batch, {"ALERT_003": run})
+    assert "Investigating ALERT_003 (2 of 6)" in line
+    assert "4 model calls" in line
+    assert "7,210 in / 310 out" in line
+    assert "41 s" in line or "42 s" in line
+    # Between alerts, or offline with no meter: no crash, a plain count.
+    assert "0 of 6" in module._batch_progress_line(SimpleNamespace(current=None, completed=0, total=6), {})
+
+
+def test_gui_run_exposes_its_meter_and_start_time():
+    from types import SimpleNamespace
+
+    from itdr_agent.gui_run import GuiRun
+    from itdr_agent.usage import TokenMeter
+
+    meter = TokenMeter()
+
+    def build(run, tool_call):
+        return SimpleNamespace(token_meter=meter, run=lambda alert: "ok")
+
+    run = GuiRun(build, {"id": "ALERT_001"})
+    assert run.meter is None and run.started is None
+    run.start()
+    assert run.wait(5) == "done"
+    assert run.meter is meter
+    assert isinstance(run.started, float)
+
+
+def test_queue_busy_block_polls_in_place_instead_of_full_reruns():
+    text = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+    assert "_batch_progress_line(" in text
+    assert "time.sleep(BATCH_POLL_SECONDS)\n        st.rerun()" not in text
