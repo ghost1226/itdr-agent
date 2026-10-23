@@ -7,8 +7,8 @@ evidence), Analyst question if needed, Containment review (approve / edit /
 reject), Audit log — plus a test that the mermaid block names every stage. No
 other prose changes.
 
-- [ ] the mermaid workflow block is in PROJECT_BRIEF.md -> `../PROJECT_BRIEF.md::flowchart TD`
-- [ ] the test extracts the mermaid block and checks every stage -> `../tests/test_project_brief.py::def test_the_diagram_names_every_stage`
-- [ ] PROGRESS.md records the task -> `../PROGRESS.md::workflow-diagram`
-- [ ] the red and green commits are recorded in PROGRESS.md -> `../PROGRESS.md::workflow-diagram: red`
-- [ ] full suite green and check_progress exits 0
+- [x] the mermaid workflow block is in PROJECT_BRIEF.md -> `../PROJECT_BRIEF.md::flowchart TD`
+- [x] the test extracts the mermaid block and checks every stage -> `../tests/test_project_brief.py::def test_the_diagram_names_every_stage`
+- [x] PROGRESS.md records the task -> `../PROGRESS.md::workflow-diagram`
+- [x] the red and green commits are recorded in PROGRESS.md -> `../PROGRESS.md::workflow-diagram: red`
+- [x] full suite green and check_progress exits 0
