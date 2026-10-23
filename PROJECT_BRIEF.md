@@ -36,6 +36,19 @@ The alert alone doesn't answer the analyst's real question: is this account comp
 
 ## 5. Flow diagram
 
+```mermaid
+flowchart TD
+    alert["Alert"] --> prefetch["Pre-fetch (code)"]
+    prefetch --> investigator["Investigator tool loop"]
+    investigator --> dossier["Dossier"]
+    dossier --> adjudicator["Adjudicator"]
+    adjudicator --> guards["Guards: confidence, thin evidence, MITRE evidence"]
+    guards -->|unsure| question["Analyst question if needed"]
+    guards -->|confident| review["Containment review: approve / edit / reject"]
+    question --> review
+    review --> audit["Audit log"]
+```
+
 `Alert → Understand goal → Gather context (tools) → Plan → Evaluate results → Ask the analyst if needed → Draft containment + rollback → Analyst approves → Report`
 
 | Step | Where it happens |
