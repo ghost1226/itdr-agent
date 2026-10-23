@@ -396,8 +396,8 @@ def _span(events: list[dict[str, Any]], key: str) -> str:
         return ""
     first, last = stamps[0], stamps[-1]
     if first.date() == last.date():
-        return f"{first:%b %-d}, {first:%H:%M} to {last:%H:%M}"
-    return f"{first:%b %-d} to {last:%b %-d}"
+        return f"{first:%b} {first.day}, {first:%H:%M} to {last:%H:%M}"
+    return f"{first:%b} {first.day} to {last:%b} {last.day}"
 
 
 def evidence_tree(alert: dict[str, Any], dossier: Any) -> dict[str, Any]:
