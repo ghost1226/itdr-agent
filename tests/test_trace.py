@@ -28,6 +28,7 @@ from itdr_agent.human import (  # noqa: E402
 )
 from itdr_agent.investigator import Investigator  # noqa: E402
 from itdr_agent.orchestrator import Orchestrator  # noqa: E402
+from itdr_agent.trace import RunTrace  # noqa: E402
 from itdr_agent.usage import TokenMeter  # noqa: E402
 from test_orchestrator import CompleteLLM, _report  # noqa: E402
 
@@ -183,6 +184,39 @@ def test_trace_records_every_llm_request_with_stage_and_seconds(tmp_path):
     for request in payload["llm_requests"]:
         assert isinstance(request["seconds"], (int, float))
         assert request["seconds"] >= 0
+
+
+def test_trace_records_every_llm_reply_with_a_capped_sample():
+    """Every model reply is logged, success or failure (2026-10-23).
+
+    The retry/error path kept the finish reason and a sample; a reply that
+    worked left nothing, so the trace could not answer what the route sent.
+    The sample is capped at 300 characters: the trace holds evidence, never
+    the whole reply.
+    """
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-replies")
+    assert trace.llm_replies == []
+    trace.record_llm_reply("investigation", "stop", "x" * 500)
+    assert trace.llm_replies == [
+        {"stage": "investigation", "finish_reason": "stop", "sample": "x" * 300}
+    ]
+
+
+def test_llm_replies_are_written_into_the_run_json(tmp_path):
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-replies-write")
+    trace.record_llm_reply("investigation", "stop", '{"action": "final"}')
+    trace.record_llm_reply("adjudication", "content_filter", "")
+
+    path = trace.write(tmp_path / "runs" / "r-replies-write.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["llm_replies"] == [
+        {
+            "stage": "investigation",
+            "finish_reason": "stop",
+            "sample": '{"action": "final"}',
+        },
+        {"stage": "adjudication", "finish_reason": "content_filter", "sample": ""},
+    ]
 
 
 def test_trace_holds_the_full_dossier_and_report(tmp_path):

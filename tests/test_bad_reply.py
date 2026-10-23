@@ -10,6 +10,7 @@ the error message, not only its class name.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,11 +45,12 @@ class FakeClient:
         return self.replies.pop(0)
 
 
-def _wrapper(cls, replies):
+def _wrapper(cls, replies, on_reply=None):
     llm = cls.__new__(cls)  # skip __init__: no real OpenAI client
     llm.client = FakeClient(replies)
     llm.model = "test/model"
     llm.meter = None
+    llm.on_reply = on_reply  # the real wrappers set this in __init__
     return llm
 
 
@@ -159,6 +161,111 @@ def test_first_json_object_handles_braces_inside_strings():
     assert cli._first_json_object(text) == '{"a": "x } y", "b": {"c": 1}}'
     assert cli._first_json_object("no json here") is None
     assert cli._first_json_object("{unbalanced") is None
+
+
+# --- every attempt is logged in the run trace, not only failures (2026-10-23) --
+# The retry/error path kept the evidence; a run that works kept nothing, so a
+# later question about what the route sent had no answer. Both wrappers now
+# report each reply through an optional on_reply hook the orchestrator wires
+# to the trace.
+
+
+def test_a_successful_call_records_one_llm_reply():
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-one")
+    llm = _wrapper(
+        cli._OpenRouterInvestigatorLLM,
+        [_reply('{"action": "final"}', finish="stop")],
+        on_reply=trace.record_llm_reply,
+    )
+    assert llm.next_action([{"role": "user", "content": "x"}]) == {"action": "final"}
+    assert trace.llm_replies == [
+        {
+            "stage": "investigation",
+            "finish_reason": "stop",
+            "sample": '{"action": "final"}',
+        }
+    ]
+
+
+def test_a_two_attempt_call_records_both_replies():
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-two")
+    llm = _wrapper(
+        cli._OpenRouterInvestigatorLLM,
+        [_reply("Sure! Here is the plan:"), _reply('{"action": "final"}')],
+        on_reply=trace.record_llm_reply,
+    )
+    assert llm.next_action([]) == {"action": "final"}
+    assert [reply["finish_reason"] for reply in trace.llm_replies] == ["stop", "stop"]
+    assert [reply["sample"] for reply in trace.llm_replies] == [
+        "Sure! Here is the plan:",
+        '{"action": "final"}',
+    ]
+
+
+def test_the_adjudicator_records_replies_under_its_own_stage():
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-adj")
+    llm = _wrapper(
+        cli._OpenRouterAdjudicatorLLM,
+        [_reply('{"verdict": "FALSE_POSITIVE"}')],
+        on_reply=trace.record_llm_reply,
+    )
+    assert llm.complete([]) == '{"verdict": "FALSE_POSITIVE"}'
+    assert [reply["stage"] for reply in trace.llm_replies] == ["adjudication"]
+
+
+def test_the_recorded_sample_never_exceeds_300_characters():
+    trace = RunTrace(alert_id="ALERT_001", run_id="r-long")
+    llm = _wrapper(
+        cli._OpenRouterInvestigatorLLM,
+        [_reply("x" * 900), _reply('{"action": "final"}')],
+        on_reply=trace.record_llm_reply,
+    )
+    llm.next_action([])
+    assert trace.llm_replies[0]["sample"] == "x" * 300
+
+
+def test_orchestrator_wires_the_hook_so_the_run_json_lists_every_reply(tmp_path):
+    """End to end: an orchestrator run writes every reply to runs/<id>.json."""
+    from test_orchestrator import _report
+    from test_trace import ALERT, fake_tool
+
+    from itdr_agent.adjudicator import Adjudicator
+    from itdr_agent.human import ScriptedReviewer
+    from itdr_agent.investigator import Investigator
+    from itdr_agent.orchestrator import Orchestrator
+
+    investigator = Investigator(
+        _wrapper(
+            cli._OpenRouterInvestigatorLLM,
+            [
+                _reply('{"action": "tool", "tool": "get_user_profile", "arguments": {"upn": "x"}}'),
+                _reply('{"action": "tool", "tool": "get_sign_in_history", "arguments": {"upn": "x"}}'),
+                _reply('{"action": "final"}'),
+            ],
+        ),
+        tool_executor=fake_tool,
+    )
+    adjudicator = Adjudicator(
+        _wrapper(cli._OpenRouterAdjudicatorLLM, [_reply(_report())]),
+        baseline=None,
+    )
+    Orchestrator(
+        investigator,
+        adjudicator,
+        ScriptedReviewer(),
+        audit_log=tmp_path / "audit.jsonl",
+        mode="mock",
+        dirty=False,
+        model="test/model",
+    ).run(ALERT, run_id="r-replies-e2e")
+
+    payload = json.loads(
+        (tmp_path / "runs" / "r-replies-e2e.json").read_text(encoding="utf-8")
+    )
+    stages = [reply["stage"] for reply in payload["llm_replies"]]
+    assert stages.count("investigation") == 3  # 2 tool turns + the final turn
+    assert stages.count("adjudication") == 1
+    assert all(reply["finish_reason"] == "stop" for reply in payload["llm_replies"])
 
 
 def test_adjudicator_takes_the_embedded_report_and_retries_with_the_nudge():
