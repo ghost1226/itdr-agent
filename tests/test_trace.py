@@ -292,7 +292,7 @@ def test_trace_is_written_on_failure_with_an_error_field(tmp_path):
         orch.run(ALERT, run_id="r-fail")
 
     payload = json.loads((tmp_path / "runs" / "r-fail.json").read_text())
-    assert payload["error"] == "RuntimeError"
+    assert payload["error"].startswith("RuntimeError")  # class name, then the message (2026-10-23)
     assert payload["dossier"] is not None
     assert payload["report"] is None
 
