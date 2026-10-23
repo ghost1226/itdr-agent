@@ -6,11 +6,10 @@ __pycache__/
 logs/
 
 # Evaluation scratch (results.md, raw.jsonl, interruptions.jsonl are committed)
-eval/dry_run/
 eval/**/state.json
 eval/**/audit.jsonl
 eval/**/audit-mock.jsonl
 # Per-run traces (synthetic data, local only)
 **/runs/
-# One-command re-run scratch (results land in PROGRESS.md, not the repo)
-eval/**/rerun/
+# Dry-run scratch only; eval/rerun results, raw and interruptions are evidence
+eval/**/dry_run/
