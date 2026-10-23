@@ -38,7 +38,7 @@ def test_no_code_file_still_names_gemma_as_a_model():
         PROJECT_ROOT / "app.py",
     ]
     for path in files:
-        assert '"google/gemma' not in path.read_text(), path
+        assert '"google/gemma' not in path.read_text(encoding="utf-8"), path
 
 
 def test_cli_uses_the_default_without_eval_model(monkeypatch, capsys):
@@ -89,7 +89,7 @@ def test_investigator_script_no_longer_requires_openrouter_model(monkeypatch):
 
 
 def test_env_example_names_the_default():
-    text = (PROJECT_ROOT / ".env.example").read_text()
+    text = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
     assert f"EVAL_MODEL={NEMOTRON}" in text
 
 

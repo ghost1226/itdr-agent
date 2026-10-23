@@ -29,7 +29,7 @@ def test_env_example_exists():
 
 def test_gitignore_blocks_env():
     """.env must never be committed."""
-    gitignore = (PROJECT_ROOT / ".gitignore").read_text()
+    gitignore = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
     assert ".env" in gitignore, ".env not in .gitignore"
 
 

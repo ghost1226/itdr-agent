@@ -365,7 +365,7 @@ def test_edit_the_rollback_on_the_page(audit):
 def test_gui_is_named_countersign_layer_zero(audit):
     at = _app()
     assert at.sidebar.title[0].value == "Countersign: Layer Zero"
-    assert 'page_title="Countersign: Layer Zero"' in (PROJECT_ROOT / "app.py").read_text()
+    assert 'page_title="Countersign: Layer Zero"' in (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
 
 
 # --- Step 2: Back to queue must not drop a run that waits on the analyst ----
@@ -486,7 +486,7 @@ def test_live_cost_line_warns_when_run_all_will_not_fit_the_daily_cap(audit):
 def test_theme_uses_the_brand_colors():
     import tomllib
 
-    config = tomllib.loads((PROJECT_ROOT / ".streamlit" / "config.toml").read_text())
+    config = tomllib.loads((PROJECT_ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
     theme = config["theme"]
     assert theme["base"] == "dark"
     assert theme["primaryColor"].upper() == "#F5A524"          # Signal, not red
@@ -569,7 +569,7 @@ def test_queue_has_a_panel_header_not_a_page_title(audit):
     text = _page_text(at)
     assert "Identity incident queue" in text
     assert "10 alerts" in text
-    assert "queue-table" in (PROJECT_ROOT / "app.py").read_text()  # styled table marker
+    assert "queue-table" in (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")  # styled table marker
 
 
 def test_queue_data_survives_the_styling(audit):
