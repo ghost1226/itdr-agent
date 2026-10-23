@@ -72,7 +72,7 @@ The 10 alerts: 5 attacks (impossible travel, MFA fatigue, anonymous IP, app cons
 pytest
 ```
 
-663 tests, no network, no API key needed. The model is mocked in every unit test.
+669 tests, no network, no API key needed. The model is mocked in every unit test.
 
 ## Run the demo
 

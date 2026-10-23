@@ -118,6 +118,11 @@ class RunTrace:
                     if before is None
                     else after["tokens_out"] - before["tokens_out"]
                 ),
+                "reasoning_tokens": (
+                    None
+                    if before is None
+                    else after["reasoning_tokens"] - before["reasoning_tokens"]
+                ),
                 "seconds": round(seconds, 3),
             }
         )

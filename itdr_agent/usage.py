@@ -18,6 +18,7 @@ class TokenMeter:
     def reset(self) -> None:
         self.tokens_in = 0
         self.tokens_out = 0
+        self.reasoning_tokens = 0
         self.llm_requests = 0
         self.requests_without_usage = 0
 
@@ -26,6 +27,7 @@ class TokenMeter:
         self.llm_requests += 1
         prompt = getattr(usage, "prompt_tokens", None)
         completion = getattr(usage, "completion_tokens", None)
+        self.reasoning_tokens += _reasoning_tokens(usage)
         if prompt is None and completion is None:
             self.requests_without_usage += 1
             return
@@ -36,9 +38,24 @@ class TokenMeter:
         return {
             "tokens_in": self.tokens_in,
             "tokens_out": self.tokens_out,
+            "reasoning_tokens": self.reasoning_tokens,
             "llm_requests": self.llm_requests,
             "requests_without_usage": self.requests_without_usage,
         }
+
+
+def _reasoning_tokens(usage: Any) -> int:
+    """``usage.completion_tokens_details.reasoning_tokens`` (0 when absent).
+
+    OpenRouter puts the model's hidden reasoning here (seen on Opus,
+    2026-10-23); a reply without it is a plain 0, never a guess.
+    """
+    details = getattr(usage, "completion_tokens_details", None)
+    if isinstance(details, dict):
+        value = details.get("reasoning_tokens")
+    else:
+        value = getattr(details, "reasoning_tokens", None)
+    return int(value or 0)
 
 
 def format_tokens(snapshot: dict[str, int] | None) -> str:
@@ -48,10 +65,11 @@ def format_tokens(snapshot: dict[str, int] | None) -> str:
     calls = snapshot["llm_requests"]
     if calls == 0:
         return "Tokens: no model calls"
-    line = (
-        f"Tokens: {snapshot['tokens_in']:,} in / {snapshot['tokens_out']:,} out "
-        f"across {calls} model call{'s' if calls != 1 else ''}"
-    )
+    line = f"Tokens: {snapshot['tokens_in']:,} in / {snapshot['tokens_out']:,} out"
+    reasoning = snapshot.get("reasoning_tokens", 0)
+    if reasoning:
+        line += f" ({reasoning:,} reasoning)"
+    line += f" across {calls} model call{'s' if calls != 1 else ''}"
     missing = snapshot["requests_without_usage"]
     if missing:
         line += f" ({missing} call{'s' if missing != 1 else ''} did not report usage)"
