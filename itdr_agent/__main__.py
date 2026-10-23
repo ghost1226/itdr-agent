@@ -28,6 +28,30 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
+class BadReplyError(RuntimeError):
+    """The model's reply was not JSON on two tries (2026-10-23).
+
+    Six of nine Opus runs through OpenRouter died with a bare JSONDecodeError
+    while the same alerts ran clean minutes later, so a bad reply is retried
+    once; the error carries the finish reason and a sample of the text.
+    """
+
+
+def _json_text(response: Any) -> tuple[str, str]:
+    """``(content, finish_reason)`` of the first choice, with ``None`` as ``""``."""
+    choice = response.choices[0]
+    return (choice.message.content or ""), str(getattr(choice, "finish_reason", ""))
+
+
+def _bad_reply(stage: str, attempts: list[tuple[str, str]]) -> BadReplyError:
+    content, finish = attempts[-1]
+    sample = content[:300] if content else "None"
+    return BadReplyError(
+        f"{stage}: model reply was not JSON twice "
+        f"(finish_reason={finish or 'unknown'}); last reply: {sample!r}"
+    )
+
+
 class _OpenRouterInvestigatorLLM:
     def __init__(
         self, api_key: str, model: str, timeout: int,
@@ -44,16 +68,24 @@ class _OpenRouterInvestigatorLLM:
         self.meter = meter
 
     def next_action(self, messages: list[dict]) -> dict[str, Any]:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0,
-            response_format={"type": "json_object"},
-            max_tokens=config.MAX_OUTPUT_TOKENS,
-        )
-        if self.meter is not None:
-            self.meter.add(getattr(response, "usage", None))
-        return json.loads(response.choices[0].message.content or "{}")
+        attempts: list[tuple[str, str]] = []
+        for _ in range(2):  # one retry on a reply that is not JSON
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0,
+                response_format={"type": "json_object"},
+                max_tokens=config.MAX_OUTPUT_TOKENS,
+            )
+            if self.meter is not None:
+                self.meter.add(getattr(response, "usage", None))
+            content, finish = _json_text(response)
+            attempts.append((content, finish))
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        raise _bad_reply("investigator", attempts)
 
 
 class _OpenRouterAdjudicatorLLM:
@@ -72,16 +104,27 @@ class _OpenRouterAdjudicatorLLM:
         self.meter = meter
 
     def complete(self, messages: list[dict]) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0,
-            response_format={"type": "json_object"},
-            max_tokens=config.MAX_OUTPUT_TOKENS,
-        )
-        if self.meter is not None:
-            self.meter.add(getattr(response, "usage", None))
-        return response.choices[0].message.content or ""
+        from .adjudicator import _strip_code_fences
+
+        attempts: list[tuple[str, str]] = []
+        for _ in range(2):  # one retry on a reply that is not JSON
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0,
+                response_format={"type": "json_object"},
+                max_tokens=config.MAX_OUTPUT_TOKENS,
+            )
+            if self.meter is not None:
+                self.meter.add(getattr(response, "usage", None))
+            content, finish = _json_text(response)
+            attempts.append((content, finish))
+            try:
+                json.loads(_strip_code_fences(content))  # the Adjudicator parses for real
+            except json.JSONDecodeError:
+                continue
+            return content
+        raise _bad_reply("adjudicator", attempts)
 
 
 def main(argv: list[str] | None = None) -> int:

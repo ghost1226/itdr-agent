@@ -141,11 +141,13 @@ def test_usage_is_recorded_even_when_the_reply_is_not_json():
 
     meter = TokenMeter()
     inv = _OpenRouterInvestigatorLLM.__new__(_OpenRouterInvestigatorLLM)
-    inv.client = FakeClient([_reply("not json", _usage(70, 9))])
+    # Two bad replies: the wrapper retries once (2026-10-23), so both are metered.
+    inv.client = FakeClient([_reply("not json", _usage(70, 9)), _reply("still not", _usage(70, 9))])
     inv.model, inv.meter = "m", meter
-    with pytest.raises(json.JSONDecodeError):
+    from itdr_agent.__main__ import BadReplyError
+    with pytest.raises(BadReplyError):
         inv.next_action([{"role": "user", "content": "x"}])
-    assert meter.snapshot()["tokens_in"] == 70
+    assert meter.snapshot()["tokens_in"] == 140
 
 
 # --- the orchestrator logs the totals --------------------------------------

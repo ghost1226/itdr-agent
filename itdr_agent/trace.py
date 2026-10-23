@@ -67,8 +67,9 @@ class RunTrace:
             )
 
     def record_error(self, exc: BaseException) -> None:
-        """The run failed; keep the exception class name in the trace."""
-        self.error = type(exc).__name__
+        """The run failed; keep the class name and the message (capped)."""
+        message = str(exc)
+        self.error = f"{type(exc).__name__}: {message}"[:600] if message else type(exc).__name__
 
     def record_analyst_answer(self, result: Any) -> None:
         self.analyst_answers.append(
