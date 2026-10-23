@@ -7,10 +7,10 @@ per-run verdict and confidence, MITRE expected vs observed, and a one-line
 note for every miss. Deterministic; README links it. No fixture or prompt
 changes.
 
-- [ ] the script loads the runs, builds the rows and renders the table -> `../scripts/test_cases_table.py::def render`
-- [ ] tests cover the rows, the notes, determinism and the real file -> `../tests/test_test_cases_table.py::def test_`
-- [ ] the real table is generated and committed -> `../docs/test-cases.md::ALERT_004`
-- [ ] README links the table -> `../README.md::docs/test-cases.md`
-- [ ] PROGRESS.md records the task -> `../PROGRESS.md::test-cases-table`
-- [ ] the red and green commits are recorded in PROGRESS.md -> `../PROGRESS.md::test-cases-table: red`
-- [ ] full suite green and check_progress exits 0
+- [x] the script loads the runs, builds the rows and renders the table -> `../scripts/test_cases_table.py::def render`
+- [x] tests cover the rows, the notes, determinism and the real file -> `../tests/test_test_cases_table.py::def test_`
+- [x] the real table is generated and committed -> `../docs/test-cases.md::ALERT_004`
+- [x] README links the table -> `../README.md::docs/test-cases.md`
+- [x] PROGRESS.md records the task -> `../PROGRESS.md::test-cases-table`
+- [x] the red and green commits are recorded in PROGRESS.md -> `../PROGRESS.md::test-cases-table: red`
+- [x] full suite green and check_progress exits 0
