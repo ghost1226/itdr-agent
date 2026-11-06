@@ -677,3 +677,5 @@ _Hashes up to the 2026-10-12 move to `~/itdr-agent` are from the pre-move copy a
 - `8147568` — reasoning-tokens: PROGRESS + tick checklists/reasoning-tokens.md (10/10); close open problem 16; list 671edbf, 47d50d4, ce17136
 - `3acc90e` — assisted-scoring: red — checklist + tests for --assisted (answer mapping from the scenario, reviewer answers instead of cancelling, records marked, results.md keeps assisted runs in their own row set)
 - `7b5aab9` — assisted-scoring: green — --assisted answers the one question from the ground-truth scenario (benign -> expected, attack -> suspicious, thin data -> don't know), marks records, and write_results_md keeps the assisted runs in their own section; README 676 tests
+- `96cb6e1` — assisted-scoring: PROGRESS + tick checklists/assisted-scoring.md (11/11); close open problem 6; list 8147568, 3acc90e, 7b5aab9
+- (next) — ci-pin: pin tests.yml Actions to commit SHAs (checkout v4.4.0, setup-python v5.6.0), same code as the tags today; Security Sweep 2 hardening (Jessica, 2026-11-06); list 96cb6e1
